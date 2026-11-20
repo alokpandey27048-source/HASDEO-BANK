@@ -1,8 +1,10 @@
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta name="google-site-verification" content="9qgt-l_NLqNygL354CoCxW8rTglAqyRnlXqXana0na4" />
-  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HASDEO BANK | Banking, made premium</title>
   <link rel="stylesheet" href="/style.css">
 </head>
@@ -35,7 +37,22 @@
 </main>
 <footer><a class="brand footer-brand" href="#"><span class="brand-mark">H</span><span>HASDEO <b>BANK</b><small>TRUST • SERVICE • SECURITY</small></span></a><span>© 2026 HASDEO BANK — EDUCATIONAL DEMO</span><span>NOT A REAL BANK</span></footer>
 
-<div class="modal hidden" id="loginModal"><div class="modal-card"><button class="close" onclick="closeLogin()">×</button><div class="eyebrow">WELCOME BACK</div><h2>Access your <em>account.</em></h2><p class="muted">Sign in to the HASDEO BANK demo dashboard.</p><form id="loginForm"><label>Username</label><input id="username" autocomplete="username" placeholder="Enter username" required><label>Password</label><input id="password" type="password" autocomplete="current-password" placeholder="Enter password" required><button class="gold-btn full">Secure sign in →</button></form><div class="demo-hint">DEMO LOGIN: <b>alok2701</b> / <b>hps2701</b></div><div class="error" id="loginError"></div></div></div>
+<div class="modal hidden" id="loginModal">
+  <div class="modal-card">
+    <button class="close" onclick="closeLogin()">×</button>
+    <div class="eyebrow">WELCOME BACK</div>
+    <h2>Access your <em>account.</em></h2>
+    <p class="muted">Sign in to the HASDEO BANK demo dashboard.</p>
+    <form id="loginForm">
+      <label>Username</label>
+      <input id="username" autocomplete="username" placeholder="Enter username" required>
+      <label>Password</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="Enter password" required>
+      <button class="gold-btn full">Secure sign in →</button>
+    </form>
+    <div class="error" id="loginError"></div>
+  </div>
+</div>
 
 <div class="dashboard hidden" id="dashboard">
   <aside class="side"><a class="brand" href="#"><span class="brand-mark">H</span><span>HASDEO <b>BANK</b><small>ADMIN PORTAL</small></span></a><div class="side-label">MENU</div><button class="side-link active">▦ &nbsp; Overview</button><button class="side-link" onclick="document.getElementById('depositAmount').focus()">＋ &nbsp; Deposit</button><button class="side-link" onclick="document.getElementById('withdrawAmount').focus()">− &nbsp; Withdraw</button><button class="side-link" onclick="document.getElementById('transferRecipient').focus()">⇄ &nbsp; Transfer</button><button class="side-link" onclick="document.getElementById('transactions').scrollIntoView()">◷ &nbsp; Transactions</button><div class="side-bottom"><small>EDUCATIONAL DEMO</small><button class="logout" onclick="logout()">↪ &nbsp; Sign out</button></div></aside>
@@ -50,4 +67,6 @@
 </div>
 <div class="toast" id="toast"></div>
 <script src="/app.js"></script>
-</body></html>
+</body>
+</html>
+```

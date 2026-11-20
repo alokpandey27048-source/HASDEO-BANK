@@ -16,9 +16,7 @@ Do not enter real banking details or use it for real money.
 Data is stored temporarily in server memory and resets when the app restarts.
 The sample login is hard-coded for demonstration only.
 
-DEMO LOGIN
-Username: alok2701
-Password: hps2701
+
 
 REQUIREMENTS
 - JDK 17 or newer
