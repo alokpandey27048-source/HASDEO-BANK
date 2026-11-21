@@ -1,0 +1,5 @@
+
+User-agent: *
+Allow: /
+
+Sitemap: https://hasdeo-bank.onrender.com/sitemap.xml
