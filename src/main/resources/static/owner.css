@@ -85,3 +85,4 @@ body.dashboard-active > #dashboard > .dash-main { min-width: 0; }
   body.dashboard-active > #dashboard > .side { min-height: auto; }
   body.dashboard-active > #dashboard > .dash-main { width: 100%; }
 }
+.access-control-option{width:100%;max-width:660px;display:flex;flex-direction:column;align-items:flex-start;gap:9px;padding:16px;border:1px solid #d6b36a55;background:rgba(255,255,255,.35);border-radius:10px;margin:4px 0 10px}.access-control-option .gold-btn{min-width:180px}.access-control-option p{margin:0 0 4px}

@@ -1,0 +1,6 @@
+CHANGELOG
+- Split Customer Access Control into two independent settings and Save buttons.
+- Signup and login settings are persisted independently on the server.
+- Kept server-side rejection for disabled signup and disabled customer login.
+- Signup no longer silently signs in a customer when customer login is OFF.
+- Existing admin access remains separate from customer access controls.

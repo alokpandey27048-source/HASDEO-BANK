@@ -1,0 +1,19 @@
+HASDEO BANK — SEPARATE CUSTOMER SIGNUP / LOGIN CONTROLS
+
+Owner Panel > Website Settings > Customer Access Control now has two independent switches and two independent Save buttons.
+
+1) Allow customer signups
+   OFF: The server rejects new public signup requests. Existing customer accounts remain stored. This setting does not change the customer-login switch.
+
+2) Allow customer logins
+   OFF: The server rejects customer login requests and blocks protected customer API access for already signed-in customer sessions. Admin login remains available.
+
+Independent behavior:
+- Signup ON + Login ON: new demo customers can create an account and are signed in.
+- Signup OFF + Login ON: no new public accounts; existing customers can sign in.
+- Signup ON + Login OFF: new demo accounts may be created, but signup does not auto-login the new customer. The page explains that login is disabled.
+- Signup OFF + Login OFF: neither new public signup nor customer login is available.
+
+Each setting is sent separately to the owner access-control endpoint. Saving one does not modify the other. The server remains authoritative; hiding buttons in the browser is not the security control.
+
+Educational demo only. These controls are not a real banking access-management product.

@@ -122,7 +122,7 @@ async function enterDashboard(role){
 }
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/login',{username:$('username').value.trim(),password:$('password').value});await enterDashboard('ADMIN');}catch(err){$('loginError').textContent=err.message;}});
 $('customerLoginForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/customer-login',{username:$('customerLoginUsername').value.trim(),password:$('customerLoginPassword').value});await enterDashboard('CUSTOMER');}catch(err){$('loginError').textContent=err.message;}});
-$('signupForm').addEventListener('submit',async e=>{e.preventDefault();if($('signupPassword').value!==$('signupConfirm').value){$('loginError').textContent='Passwords do not match.';return;}try{await api('/signup',{name:$('signupName').value.trim(),username:$('signupUsername').value.trim(),email:$('signupEmail').value.trim(),password:$('signupPassword').value});$('signupForm').reset();await enterDashboard('CUSTOMER');toast('Your demo account has been created.');}catch(err){$('loginError').textContent=err.message;}});
+$('signupForm').addEventListener('submit',async e=>{e.preventDefault();if($('signupPassword').value!==$('signupConfirm').value){$('loginError').textContent='Passwords do not match.';return;}try{const result=await api('/signup',{name:$('signupName').value.trim(),username:$('signupUsername').value.trim(),email:$('signupEmail').value.trim(),password:$('signupPassword').value});$('signupForm').reset();if(result.requiresLogin){$('loginError').textContent=result.message||'Account created, but customer login is currently disabled. Please contact the website owner.';toast('Demo account created; login is currently OFF.');return;}await enterDashboard('CUSTOMER');toast('Your demo account has been created.');}catch(err){$('loginError').textContent=err.message;}});
 
 async function loadAccount(){
   const data=await api('/account',null,'GET');
@@ -320,7 +320,9 @@ async function loadActivity(){
 async function loadSettings(){
   const data=await api('/owner/settings',null,'GET');$('siteTitle').value=data.siteTitle||'';
   $('customerSignupEnabled').checked=data.customerSignupEnabled!==false; $('customerLoginEnabled').checked=data.customerLoginEnabled!==false;
-  $('customerAccessFeedback').textContent='Current status: signups '+(data.customerSignupEnabled===false?'OFF':'ON')+' · customer logins '+(data.customerLoginEnabled===false?'OFF':'ON');
+  $('signupAccessFeedback').textContent='Signup: '+(data.customerSignupEnabled===false?'OFF':'ON');
+  $('loginAccessFeedback').textContent='Customer login: '+(data.customerLoginEnabled===false?'OFF':'ON');
+  $('customerAccessFeedback').textContent='Both settings are stored separately on the server.';
   await Promise.all([loadMailStatus(),loadServerTimeStatus()]);
 }
 async function loadMailStatus(){
@@ -350,16 +352,25 @@ $('sendAnnouncement').addEventListener('click',async()=>{
   catch(error){$('announcementFeedback').textContent=error.message;toast(error.message);}
   finally{button.disabled=false;button.textContent='Send to all customers';}
 });
-$('saveCustomerAccess').addEventListener('click',async()=>{
-  const button=$('saveCustomerAccess');button.disabled=true;button.textContent='Saving…';
+async function saveOneCustomerAccessSetting(kind){
+  const isSignup=kind==='signup';
+  const checkbox=$(isSignup?'customerSignupEnabled':'customerLoginEnabled');
+  const button=$(isSignup?'saveCustomerSignup':'saveCustomerLogin');
+  const feedback=$(isSignup?'signupAccessFeedback':'loginAccessFeedback');
+  const field=isSignup?'customerSignupEnabled':'customerLoginEnabled';
+  const label=isSignup?'Signup':'Customer login';
+  button.disabled=true;button.textContent='Saving…';
   try{
-    const result=await api('/owner/access-control',{customerSignupEnabled:$('customerSignupEnabled').checked,customerLoginEnabled:$('customerLoginEnabled').checked});
+    const result=await api('/owner/access-control',{[field]:checkbox.checked});
     await checkPublicStatus();
-    $('customerAccessFeedback').textContent='Saved · signups '+(result.customerSignupEnabled?'ON':'OFF')+' · customer logins '+(result.customerLoginEnabled?'ON':'OFF');
-    toast('Customer access settings saved.');
-  }catch(error){$('customerAccessFeedback').textContent=error.message;toast(error.message);}
-  finally{button.disabled=false;button.textContent='Save customer access settings';}
-});
+    feedback.textContent=label+': '+(result[field]?'ON':'OFF')+' · saved';
+    $('customerAccessFeedback').textContent=label+' setting saved independently. Other setting was not changed.';
+    toast(label+' setting saved: '+(result[field]?'ON':'OFF'));
+  }catch(error){feedback.textContent='Save failed: '+error.message;toast(error.message);}
+  finally{button.disabled=false;button.textContent=isSignup?'Save signup setting':'Save login setting';}
+}
+$('saveCustomerSignup').addEventListener('click',()=>saveOneCustomerAccessSetting('signup'));
+$('saveCustomerLogin').addEventListener('click',()=>saveOneCustomerAccessSetting('login'));
 async function loadAiBrain(){
   const data=await api('/owner/settings',null,'GET');
   $('aiCreatorName').value=data.aiCreatorName||'Alok';

@@ -97,11 +97,15 @@ public class BankController {
         String code=uniqueDigits(4,true), card=uniqueDigits(16,false);
         DemoCustomer c=new DemoCustomer("HBC"+UUID.randomUUID().toString().replace("-","").substring(0,10).toUpperCase(Locale.ROOT),name,"",email,"Savings");
         c.setUsername(username); c.setPasswordHash(hashPassword(password)); c.setTransferCode(code); c.setCardNumber(card); c.setBalance(BigDecimal.ZERO);
-        c=customerRepository.save(c); request.changeSessionId(); session.removeAttribute("loggedIn"); session.removeAttribute("adminUsername"); session.setAttribute("customerId",c.getId()); session.setAttribute("customerUsername",username); session.setMaxInactiveInterval(30*60);
-        sessionRepository.save(new AdminSessionRecord(sessionHash(session),username,"CUSTOMER"));
-        activityRepository.save(new ActivityLog(username,"PRESENCE_ONLINE","Customer session started through signup"));
+        c=customerRepository.save(c);
         activityRepository.save(new ActivityLog(username,"CUSTOMER_SIGNUP","New demo customer account created"));
         mailService.notifyAdmin("New customer signup","Customer: "+name+"\nUsername: "+username+"\nTransfer code: "+code);
+        // Signup and login are independent switches. If login is OFF, create the account
+        // without silently signing the new customer in.
+        if(!customerLoginAllowed()) return Map.of("success",true,"accountCreated",true,"requiresLogin",true,"message","Demo account created. Customer login is currently disabled by the website owner.");
+        request.changeSessionId(); session.removeAttribute("loggedIn"); session.removeAttribute("adminUsername"); session.setAttribute("customerId",c.getId()); session.setAttribute("customerUsername",username); session.setMaxInactiveInterval(30*60);
+        sessionRepository.save(new AdminSessionRecord(sessionHash(session),username,"CUSTOMER"));
+        activityRepository.save(new ActivityLog(username,"PRESENCE_ONLINE","Customer session started through signup"));
         return customerSessionMap(c);
     }
 
