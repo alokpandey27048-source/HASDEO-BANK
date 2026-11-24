@@ -1,0 +1,36 @@
+HASDEO BANK — CARD TIERS, QR PROFILE & CUSTOMER ACCESS LABEL UPDATE
+
+This update is for the educational/demo project only. It does not connect to a real bank, card network, payment processor, or identity system.
+
+CUSTOMER ACCESS CONTROL
+- Owner Panel > Website Settings > Customer Access Control is written in English.
+- Signup and Customer Login remain independent controls, each with its own Save button.
+
+FIVE DEMO CARD TIERS
+- Classic: navy and silver
+- Silver: metallic silver
+- Gold: dark gold
+- Platinum: graphite and platinum
+- Royal: royal purple and gold
+- New signup form asks customers to choose a card tier.
+- The selected tier is stored with the customer record and applied to the dashboard card theme.
+- Customer dashboard and Card Management workspace include an Upgrade Card option.
+- Card style changes are saved to the database and recorded in Activity Logs.
+
+QR PROFILE
+- Each customer gets a random 192-bit QR token.
+- The QR opens /card.html?token=... and fetches the current public demo profile.
+- The public page shows customer display name, demo customer ID, card tier, last four digits only, and account status.
+- It does NOT expose full card number, transfer code, password, email, balance, or transaction history.
+- Older customer records receive a QR token the next time they open their account dashboard.
+
+DATABASE
+- Hibernate ddl-auto=update adds nullable card_tier and qr_token columns to demo_customers.
+- Existing customer rows remain; old card tiers default to Classic when their account is opened.
+- Do not delete or reset the existing Neon database.
+
+VALIDATION
+- JavaScript syntax check passed with Node.
+- HTML duplicate-ID checks passed for index.html and card.html.
+- pom.xml parsed as valid XML.
+- Maven build was not run in this environment because Maven is not installed. Run mvn clean package locally before pushing.

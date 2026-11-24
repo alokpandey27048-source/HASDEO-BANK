@@ -95,8 +95,9 @@ public class BankController {
         if(password.length()<8 || password.length()>100) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Password must be at least 8 characters.");
         if(customerRepository.existsByUsername(username)) throw new ResponseStatusException(HttpStatus.CONFLICT,"Username already exists.");
         String code=uniqueDigits(4,true), card=uniqueDigits(16,false);
+        String cardTier=validCardTier(body.getOrDefault("cardTier","Classic"));
         DemoCustomer c=new DemoCustomer("HBC"+UUID.randomUUID().toString().replace("-","").substring(0,10).toUpperCase(Locale.ROOT),name,"",email,"Savings");
-        c.setUsername(username); c.setPasswordHash(hashPassword(password)); c.setTransferCode(code); c.setCardNumber(card); c.setBalance(BigDecimal.ZERO);
+        c.setUsername(username); c.setPasswordHash(hashPassword(password)); c.setTransferCode(code); c.setCardNumber(card); c.setCardTier(cardTier); c.setQrToken(newQrToken()); c.setBalance(BigDecimal.ZERO);
         c=customerRepository.save(c);
         activityRepository.save(new ActivityLog(username,"CUSTOMER_SIGNUP","New demo customer account created"));
         mailService.notifyAdmin("New customer signup","Customer: "+name+"\nUsername: "+username+"\nTransfer code: "+code);
@@ -195,13 +196,35 @@ public class BankController {
         return Map.of("maintenance",s.isMaintenanceEnabled(),"message",safe(s.getMaintenanceMessage()),"siteTitle",safe(s.getSiteTitle()),"announcement",safe(s.getAnnouncement()),"announcementUpdatedAt",s.getAnnouncementUpdatedAt()==null?"":s.getAnnouncementUpdatedAt().toString(),"customerSignupEnabled",s.isCustomerSignupEnabled(),"customerLoginEnabled",s.isCustomerLoginEnabled());
     }
 
-    @GetMapping("/account") @Transactional(readOnly=true)
+    @GetMapping("/account") @Transactional
     public Map<String,Object> account(HttpSession session) {
         requireLogin(session); DemoCustomer customer=currentCustomer(session);
+        if(customer!=null){if(customer.getQrToken()==null || customer.getQrToken().isBlank()) customer.setQrToken(newQrToken());if(customer.getCardTier()==null || customer.getCardTier().isBlank()) customer.setCardTier("Classic");}
         BigDecimal balance; String name,card,code,accountType,status; List<BankTransaction> tx;
         if(customer!=null){balance=customer.getBalance();name=customer.getName();card=customer.getCardNumber();code=customer.getTransferCode();accountType=customer.getAccountType();status=customer.getStatus();tx=transactionRepository.findTop100ByCustomerIdOrderByCreatedAtDesc(customer.getId());}
         else {AccountState a=accountRepository.findById(1L).orElseThrow(()->new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,"Demo account is not initialized."));balance=a.getBalance();name="HASDEO BANK Admin";card="0000000000002704";code="2704";accountType="Premium Savings";status="ACTIVE";tx=transactionRepository.findTop100ByOrderByCreatedAtDesc();}
-        Map<String,Object> result=new LinkedHashMap<>();result.put("name",name);result.put("cardNumber",card);result.put("accountNumber",card);result.put("transferCode",code);result.put("accountType",accountType);result.put("status",status);result.put("balance",balance);result.put("role",customer==null?"ADMIN":"CUSTOMER");result.put("transactions",tx.stream().map(this::toTransactionMap).toList());return result;
+        Map<String,Object> result=new LinkedHashMap<>();result.put("name",name);result.put("cardNumber",card);result.put("accountNumber",card);result.put("transferCode",code);result.put("accountType",accountType);result.put("cardTier",customer==null?"Royal":customer.getCardTier());result.put("qrToken",customer==null?"":customer.getQrToken());result.put("status",status);result.put("balance",balance);result.put("role",customer==null?"ADMIN":"CUSTOMER");result.put("transactions",tx.stream().map(this::toTransactionMap).toList());return result;
+    }
+
+    private static final Set<String> CARD_TIERS=Set.of("Classic","Silver","Gold","Platinum","Royal");
+    private String validCardTier(String value){String tier=value==null?"Classic":value.trim();if(!CARD_TIERS.contains(tier))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Choose a valid demo card tier.");return tier;}
+    private String newQrToken(){byte[] bytes=new byte[24];new SecureRandom().nextBytes(bytes);return HexFormat.of().formatHex(bytes);}
+
+    @GetMapping("/public/card/{token}") @Transactional(readOnly=true)
+    public Map<String,Object> publicDemoCard(@PathVariable String token){
+        if(token==null || !token.matches("[a-fA-F0-9]{48}")) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"Demo card profile not found.");
+        DemoCustomer c=customerRepository.findByQrToken(token).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Demo card profile not found."));
+        String card=Objects.toString(c.getCardNumber(),"");
+        return Map.of("name",c.getName(),"customerCode",c.getCustomerCode(),"cardTier",Objects.toString(c.getCardTier(),"Classic"),"cardLastFour",card.length()>=4?card.substring(card.length()-4):"----","status",c.getStatus(),"notice","Public educational demo profile. No real banking or payment account is represented.");
+    }
+
+    @PostMapping("/customer/card-tier") @Transactional
+    public Map<String,Object> updateCustomerCardTier(@RequestBody Map<String,String> body,HttpSession session){
+        requireLogin(session);DemoCustomer c=currentCustomer(session);
+        if(c==null) throw new ResponseStatusException(HttpStatus.FORBIDDEN,"Only customer demo accounts can change card styles.");
+        String tier=validCardTier(body.get("cardTier"));String old=c.getCardTier();c.setCardTier(tier);
+        log(session,"DEMO_CARD_TIER_UPDATED","Card tier changed from "+old+" to "+tier);
+        return Map.of("success",true,"cardTier",tier,"message","Demo card style updated.");
     }
 
     @PostMapping("/deposit") @Transactional
@@ -549,6 +572,6 @@ public class BankController {
     private String formatTime(Instant instant){return instant==null?"—":instant.atZone(INDIA_ZONE).format(DATE_FORMAT);}
     private Map<String,Object> timeMap(Map<String,Object> base,Instant instant){Map<String,Object> m=new LinkedHashMap<>(base);m.put("timestamp",instant.atZone(INDIA_ZONE).toOffsetDateTime().toString());m.put("date",formatTime(instant));return m;}
     private Map<String,Object> toTransactionMap(BankTransaction t){Map<String,Object> m=new LinkedHashMap<>();m.put("id","HB"+t.getId());m.put("description",t.getDescription());m.put("amount",t.getAmount());m.put("type",t.getType());return timeMap(m,t.getCreatedAt());}
-    private Map<String,Object> toCustomerMap(DemoCustomer c){Map<String,Object> m=new LinkedHashMap<>();m.put("id",c.getId());m.put("customerCode",c.getCustomerCode());m.put("name",c.getName());m.put("contact",safe(c.getContactLabel()));m.put("email",safe(c.getEmailLabel()));m.put("username",safe(c.getUsername()));m.put("accountType",c.getAccountType());m.put("status",c.getStatus());m.put("createdAt",formatTime(c.getCreatedAt()));m.put("cardNumber",safe(c.getCardNumber()));m.put("transferCode",safe(c.getTransferCode()));m.put("balance",c.getBalance());return m;}
+    private Map<String,Object> toCustomerMap(DemoCustomer c){Map<String,Object> m=new LinkedHashMap<>();m.put("id",c.getId());m.put("customerCode",c.getCustomerCode());m.put("name",c.getName());m.put("contact",safe(c.getContactLabel()));m.put("email",safe(c.getEmailLabel()));m.put("username",safe(c.getUsername()));m.put("accountType",c.getAccountType());m.put("cardTier",c.getCardTier()==null?"Classic":c.getCardTier());m.put("status",c.getStatus());m.put("createdAt",formatTime(c.getCreatedAt()));m.put("cardNumber",safe(c.getCardNumber()));m.put("transferCode",safe(c.getTransferCode()));m.put("balance",c.getBalance());return m;}
     private Map<String,Object> settingsMap(SiteSettings s){return Map.of("siteTitle",safe(s.getSiteTitle()),"announcement",safe(s.getAnnouncement()),"maintenance",s.isMaintenanceEnabled(),"maintenanceMessage",safe(s.getMaintenanceMessage()),"aiCreatorName",safe(s.getAiCreatorName()),"aiCustomKnowledge",safe(s.getAiCustomKnowledge()),"customerSignupEnabled",s.isCustomerSignupEnabled(),"customerLoginEnabled",s.isCustomerLoginEnabled());}
 }
