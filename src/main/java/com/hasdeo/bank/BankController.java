@@ -38,16 +38,17 @@ public class BankController {
     private final GoogleDriveBackupService backupService;
     private final SupportTicketRepository supportRepository;
     private final com.hasdeo.bank.service.AdminMailService mailService;
+    private final com.hasdeo.bank.service.SupportAiService supportAiService;
 
     @Value("${ADMIN_USERNAME:}") private String adminUsername;
     @Value("${ADMIN_PASSWORD:}") private String adminPassword;
 
     public BankController(AccountStateRepository accountRepository, BankTransactionRepository transactionRepository,
                           DemoCustomerRepository customerRepository, ActivityLogRepository activityRepository,
-                          AdminSessionRepository sessionRepository, SiteSettingsRepository settingsRepository, GoogleDriveBackupService backupService, SupportTicketRepository supportRepository, com.hasdeo.bank.service.AdminMailService mailService) {
+                          AdminSessionRepository sessionRepository, SiteSettingsRepository settingsRepository, GoogleDriveBackupService backupService, SupportTicketRepository supportRepository, com.hasdeo.bank.service.AdminMailService mailService, com.hasdeo.bank.service.SupportAiService supportAiService) {
         this.accountRepository=accountRepository; this.transactionRepository=transactionRepository;
         this.customerRepository=customerRepository; this.activityRepository=activityRepository;
-        this.sessionRepository=sessionRepository; this.settingsRepository=settingsRepository; this.backupService=backupService; this.supportRepository=supportRepository; this.mailService=mailService;
+        this.sessionRepository=sessionRepository; this.settingsRepository=settingsRepository; this.backupService=backupService; this.supportRepository=supportRepository; this.mailService=mailService; this.supportAiService=supportAiService;
     }
 
     private void requireLogin(HttpSession session) {
@@ -137,6 +138,19 @@ public class BankController {
         session.invalidate(); return Map.of("success",true);
     }
 
+    @GetMapping("/session")
+    @Transactional(readOnly=true)
+    public Map<String,Object> sessionStatus(HttpSession session) {
+        if (Boolean.TRUE.equals(session.getAttribute("loggedIn")))
+            return Map.of("authenticated",true,"role","ADMIN");
+        Object customerId = session.getAttribute("customerId");
+        if (customerId != null) {
+            DemoCustomer customer = currentCustomer(session);
+            return Map.of("authenticated",true,"role","CUSTOMER","name",customer.getName());
+        }
+        return Map.of("authenticated",false);
+    }
+
     @PostMapping("/session/ping")
     @Transactional
     public Map<String,Object> sessionPing(HttpSession session) {
@@ -157,7 +171,7 @@ public class BankController {
         requireLogin(session); DemoCustomer customer=currentCustomer(session);
         BigDecimal balance; String name,card,code,accountType,status; List<BankTransaction> tx;
         if(customer!=null){balance=customer.getBalance();name=customer.getName();card=customer.getCardNumber();code=customer.getTransferCode();accountType=customer.getAccountType();status=customer.getStatus();tx=transactionRepository.findTop100ByCustomerIdOrderByCreatedAtDesc(customer.getId());}
-        else {AccountState a=accountRepository.findById(1L).orElseThrow(()->new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,"Demo account is not initialized."));balance=a.getBalance();name="HASDEO BANK Admin";card="0000000000002701";code="ADMIN";accountType="Premium Savings";status="ACTIVE";tx=transactionRepository.findTop100ByOrderByCreatedAtDesc();}
+        else {AccountState a=accountRepository.findById(1L).orElseThrow(()->new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,"Demo account is not initialized."));balance=a.getBalance();name="HASDEO BANK Admin";card="0000000000002704";code="2704";accountType="Premium Savings";status="ACTIVE";tx=transactionRepository.findTop100ByOrderByCreatedAtDesc();}
         Map<String,Object> result=new LinkedHashMap<>();result.put("name",name);result.put("cardNumber",card);result.put("accountNumber",card);result.put("transferCode",code);result.put("accountType",accountType);result.put("status",status);result.put("balance",balance);result.put("role",customer==null?"ADMIN":"CUSTOMER");result.put("transactions",tx.stream().map(this::toTransactionMap).toList());return result;
     }
 
@@ -176,13 +190,67 @@ public class BankController {
         AccountState a=lockedAccount();if(amount.compareTo(a.getBalance())>0)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Insufficient demo balance.");a.setBalance(a.getBalance().subtract(amount));transactionRepository.save(new BankTransaction("Cash withdrawal",amount,"DEBIT",now));log(session,"DEMO_WITHDRAWAL","Demo withdrawal recorded: ₹"+amount);mailService.notifyAdmin("Demo withdrawal", "Customer/admin: "+actor(session)+"\nAmount: ₹"+amount);return Map.of("success",true,"balance",a.getBalance());
     }
     @GetMapping("/recipient/{code}") @Transactional(readOnly=true)
-    public Map<String,Object> recipient(@PathVariable String code,HttpSession session){requireLogin(session);if(!code.matches("\\d{4}"))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter a valid 4-digit transfer code.");DemoCustomer c=customerRepository.findByTransferCode(code).filter(x->"ACTIVE".equals(x.getStatus())).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"No active customer found for this code."));return Map.of("name",c.getName(),"transferCode",c.getTransferCode());}
+    public Map<String,Object> recipient(@PathVariable String code,HttpSession session){
+        requireLogin(session);
+        if(!code.matches("\\d{4}")) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter a valid 4-digit demo transfer code.");
+        if("2704".equals(code)) return Map.of("name","HASDEO BANK Admin","transferCode","2704","role","ADMIN");
+        DemoCustomer c=customerRepository.findByTransferCode(code).filter(x->"ACTIVE".equals(x.getStatus())).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"No active demo account found for this code."));
+        return Map.of("name",c.getName(),"transferCode",c.getTransferCode(),"role","CUSTOMER");
+    }
+
     @PostMapping("/transfer") @Transactional
     public Map<String,Object> transfer(@RequestBody Map<String,Object> body,HttpSession session) {
-        requireLogin(session);DemoCustomer sender=currentCustomer(session);if(sender==null)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Only customer demo accounts can transfer to another customer.");BigDecimal amount=getAmount(body);String code=String.valueOf(body.getOrDefault("recipientCode","")).trim();
-        if(!code.matches("\\d{4}"))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter the recipient's 4-digit transfer code.");if(amount.signum()<=0)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter a valid amount.");
-        DemoCustomer receiverRef=customerRepository.findByTransferCode(code).filter(x->"ACTIVE".equals(x.getStatus())).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Recipient not found."));if(receiverRef.getId().equals(sender.getId()))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"You cannot transfer to your own account.");Long firstId=Math.min(sender.getId(),receiverRef.getId()),secondId=Math.max(sender.getId(),receiverRef.getId());DemoCustomer first=customerRepository.findByIdForUpdate(firstId).orElseThrow(),second=customerRepository.findByIdForUpdate(secondId).orElseThrow();sender=sender.getId().equals(firstId)?first:second;DemoCustomer receiver=receiverRef.getId().equals(firstId)?first:second;if(amount.compareTo(sender.getBalance())>0)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Insufficient demo balance.");
-        sender.setBalance(sender.getBalance().subtract(amount));receiver.setBalance(receiver.getBalance().add(amount));Instant now=Instant.now();transactionRepository.save(new BankTransaction("Transfer sent to "+receiver.getName()+" ("+code+")",amount,"DEBIT",now,sender.getId()));transactionRepository.save(new BankTransaction("Transfer received from "+sender.getName(),amount,"CREDIT",now,receiver.getId()));log(session,"DEMO_TRANSFER","Demo transfer sent to code "+code+": ₹"+amount);mailService.notifyAdmin("Demo transfer", "Sender: "+sender.getName()+" ("+sender.getTransferCode()+")\nReceiver: "+receiver.getName()+" ("+code+")\nAmount: ₹"+amount);return Map.of("success",true,"balance",sender.getBalance(),"recipientName",receiver.getName());
+        requireLogin(session);
+        BigDecimal amount=getAmount(body);
+        String code=String.valueOf(body.getOrDefault("recipientCode","")).trim();
+        if(!code.matches("\\d{4}")) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter the recipient's 4-digit demo code.");
+        if(amount.signum()<=0 || amount.compareTo(new BigDecimal("1000000.00"))>0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter a valid demo amount.");
+        DemoCustomer sender=currentCustomer(session);
+        Instant now=Instant.now();
+
+        // 2704 represents the fictional admin demo account.
+        if(sender==null) {
+            if("2704".equals(code)) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"You cannot transfer to the same admin demo account.");
+            AccountState admin=lockedAccount();
+            DemoCustomer receiverRef=customerRepository.findByTransferCode(code).filter(x->"ACTIVE".equals(x.getStatus())).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Recipient not found."));
+            DemoCustomer receiver=customerRepository.findByIdForUpdate(receiverRef.getId()).orElseThrow();
+            if(amount.compareTo(admin.getBalance())>0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Insufficient admin demo balance.");
+            admin.setBalance(admin.getBalance().subtract(amount));
+            receiver.setBalance(receiver.getBalance().add(amount));
+            transactionRepository.save(new BankTransaction("Admin demo transfer sent to "+receiver.getName()+" ("+code+")",amount,"DEBIT",now));
+            transactionRepository.save(new BankTransaction("Demo transfer received from HASDEO BANK Admin",amount,"CREDIT",now,receiver.getId()));
+            log(session,"ADMIN_DEMO_TRANSFER","Admin demo transfer sent to "+code+": ₹"+amount);
+            mailService.notifyAdmin("Admin demo transfer","Receiver: "+receiver.getName()+" ("+code+")\nAmount: ₹"+amount);
+            return Map.of("success",true,"balance",admin.getBalance(),"recipientName",receiver.getName());
+        }
+
+        if("2704".equals(code)) {
+            AccountState admin=lockedAccount();
+            DemoCustomer lockedSender=customerRepository.findByIdForUpdate(sender.getId()).orElseThrow();
+            if(amount.compareTo(lockedSender.getBalance())>0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Insufficient demo balance.");
+            lockedSender.setBalance(lockedSender.getBalance().subtract(amount));
+            admin.setBalance(admin.getBalance().add(amount));
+            transactionRepository.save(new BankTransaction("Demo transfer sent to HASDEO BANK Admin (2704)",amount,"DEBIT",now,lockedSender.getId()));
+            transactionRepository.save(new BankTransaction("Demo transfer received from "+lockedSender.getName(),amount,"CREDIT",now));
+            log(session,"DEMO_TRANSFER_TO_ADMIN","Demo transfer sent to admin code 2704: ₹"+amount);
+            mailService.notifyAdmin("Customer to admin demo transfer","Sender: "+lockedSender.getName()+" ("+lockedSender.getTransferCode()+")\nAmount: ₹"+amount);
+            return Map.of("success",true,"balance",lockedSender.getBalance(),"recipientName","HASDEO BANK Admin");
+        }
+
+        DemoCustomer receiverRef=customerRepository.findByTransferCode(code).filter(x->"ACTIVE".equals(x.getStatus())).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Recipient not found."));
+        if(receiverRef.getId().equals(sender.getId())) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"You cannot transfer to your own account.");
+        Long firstId=Math.min(sender.getId(),receiverRef.getId()),secondId=Math.max(sender.getId(),receiverRef.getId());
+        DemoCustomer first=customerRepository.findByIdForUpdate(firstId).orElseThrow(),second=customerRepository.findByIdForUpdate(secondId).orElseThrow();
+        sender=sender.getId().equals(firstId)?first:second;
+        DemoCustomer receiver=receiverRef.getId().equals(firstId)?first:second;
+        if(!"ACTIVE".equals(receiver.getStatus())) throw new ResponseStatusException(HttpStatus.FORBIDDEN,"Recipient account is inactive.");
+        if(amount.compareTo(sender.getBalance())>0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Insufficient demo balance.");
+        sender.setBalance(sender.getBalance().subtract(amount)); receiver.setBalance(receiver.getBalance().add(amount));
+        transactionRepository.save(new BankTransaction("Transfer sent to "+receiver.getName()+" ("+code+")",amount,"DEBIT",now,sender.getId()));
+        transactionRepository.save(new BankTransaction("Transfer received from "+sender.getName(),amount,"CREDIT",now,receiver.getId()));
+        log(session,"DEMO_TRANSFER","Demo transfer sent to code "+code+": ₹"+amount);
+        mailService.notifyAdmin("Demo transfer","Sender: "+sender.getName()+" ("+sender.getTransferCode()+")\nReceiver: "+receiver.getName()+" ("+code+")\nAmount: ₹"+amount);
+        return Map.of("success",true,"balance",sender.getBalance(),"recipientName",receiver.getName());
     }
 
     @PostMapping("/support") @Transactional
@@ -190,8 +258,39 @@ public class BankController {
         String name=requiredText(body,"name",100), email=requiredText(body,"email",120), category=requiredText(body,"category",40), message=requiredText(body,"message",1200);
         if(!email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter a valid email address.");
         SupportTicket ticket=supportRepository.save(new SupportTicket(name,email,category,message));
-        mailService.notifyAdmin("New support request #"+ticket.getId(),"Name: "+name+"\nEmail: "+email+"\nCategory: "+category+"\nMessage: "+message);
-        return Map.of("success",true,"ticketId",ticket.getId());
+        boolean emailSent=mailService.notifyAdmin("New support request #"+ticket.getId(),"Name: "+name+"\nEmail: "+email+"\nCategory: "+category+"\nMessage: "+message);
+        return Map.of("success",true,"ticketId",ticket.getId(),"emailSent",emailSent);
+    }
+
+    @PostMapping("/support/ai") @Transactional
+    public Map<String,Object> aiSupport(@RequestBody Map<String,Object> body) {
+        String message=String.valueOf(body.getOrDefault("message", "")).trim();
+        if(message.isBlank() || message.length()>1200) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter a question up to 1200 characters.");
+        String name=optionalText(String.valueOf(body.getOrDefault("name", "")),100);
+        String email=optionalText(String.valueOf(body.getOrDefault("email", "")),120);
+        if(!email.isBlank()&&!email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter a valid email address.");
+        List<Map<String,String>> history=new ArrayList<>();
+        Object rawHistory=body.get("history");
+        if(rawHistory instanceof List<?> items) for(Object item:items) {
+            if(item instanceof Map<?,?> map) {
+                String role=String.valueOf(map.get("role") == null ? "" : map.get("role"));
+                String content=String.valueOf(map.get("content") == null ? "" : map.get("content"));
+                if(("user".equals(role)||"assistant".equals(role))&&!content.isBlank()) history.add(Map.of("role",role,"content",content.substring(0,Math.min(1200,content.length()))));
+            }
+        }
+        try {
+            com.hasdeo.bank.service.SupportAiService.AiReply reply=supportAiService.reply(history,message);
+            if(!reply.needsHuman()) return Map.of("success",true,"answer",reply.answer(),"escalated",false);
+            String transcript=history.stream().map(m->m.get("role")+": "+m.get("content")).reduce("",(a,b)->a+b+"\n")+"Customer: "+message+"\nAI: "+reply.answer();
+            SupportTicket ticket=supportRepository.save(new SupportTicket(name.isBlank()?"Website visitor":name,email,"AI escalation",transcript.substring(0,Math.min(1200,transcript.length()))));
+            boolean emailSent=mailService.notifyAdmin("AI support needs human help #"+ticket.getId(),"Name: "+(name.isBlank()?"Not provided":name)+"\nEmail: "+(email.isBlank()?"Not provided":email)+"\nConversation:\n"+transcript);
+            return Map.of("success",true,"answer",reply.answer()+"\n\nI've forwarded this to the website support team. Reference ticket #"+ticket.getId()+".","escalated",true,"ticketId",ticket.getId(),"emailSent",emailSent);
+        } catch(Exception ex) {
+            String transcript="Customer: "+message+"\nAI status: "+(supportAiService.isConfigured()?"Unable to answer":"AI API key is not configured");
+            SupportTicket ticket=supportRepository.save(new SupportTicket(name.isBlank()?"Website visitor":name,email,"AI unavailable",transcript));
+            boolean emailSent=mailService.notifyAdmin("AI support fallback #"+ticket.getId(),"Name: "+(name.isBlank()?"Not provided":name)+"\nEmail: "+(email.isBlank()?"Not provided":email)+"\nQuestion: "+message+"\nDetails: "+ex.getMessage());
+            return Map.of("success",true,"answer","I couldn't confidently solve this right now. I've saved your question as support ticket #"+ticket.getId()+". You can also use Contact Support below.","escalated",true,"ticketId",ticket.getId(),"emailSent",emailSent);
+        }
     }
 
     @GetMapping("/owner/support") @Transactional(readOnly=true)
@@ -250,7 +349,11 @@ public class BankController {
     @GetMapping("/owner/sessions") @Transactional
     public List<Map<String,Object>> sessions(HttpSession session) {
         requireAdmin(session); expireStaleSessions();
-        return sessionRepository.findTop100ByOrderByLoginAtDesc().stream().map(s->{Map<String,Object> m=new LinkedHashMap<>();m.put("username",s.getUsername());m.put("status",s.getStatus());m.put("loginAt",formatTime(s.getLoginAt()));m.put("lastSeenAt",formatTime(s.getLastSeenAt()));m.put("logoutAt",s.getLogoutAt()==null?"—":formatTime(s.getLogoutAt()));return m;}).toList();
+        List<Map<String,Object>> rows=new ArrayList<>();
+        sessionRepository.findTop100ByOrderByLoginAtDesc().forEach(s->{Map<String,Object> m=new LinkedHashMap<>();m.put("username",s.getUsername());m.put("status",s.getStatus());m.put("loginAt",formatTime(s.getLoginAt()));m.put("lastSeenAt",formatTime(s.getLastSeenAt()));m.put("logoutAt",s.getLogoutAt()==null?"—":formatTime(s.getLogoutAt()));rows.add(m);});
+        activityRepository.findTop100ByOrderByCreatedAtDesc().stream().filter(a->"CUSTOMER_LOGIN".equals(a.getAction()) || "CUSTOMER_SIGNUP".equals(a.getAction())).forEach(a->{Map<String,Object> m=new LinkedHashMap<>();m.put("username",a.getActor());m.put("status","CUSTOMER_SIGNUP".equals(a.getAction())?"SIGNED UP":"CUSTOMER LOGIN");m.put("loginAt",formatTime(a.getCreatedAt()));m.put("lastSeenAt",formatTime(a.getCreatedAt()));m.put("logoutAt","—");rows.add(m);});
+        rows.sort((a,b)->String.valueOf(b.get("loginAt")).compareTo(String.valueOf(a.get("loginAt"))));
+        return rows.stream().limit(100).toList();
     }
 
     @GetMapping("/owner/settings") @Transactional(readOnly=true)

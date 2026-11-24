@@ -44,12 +44,13 @@ public class AdminMailService {
         return Map.of("success", true, "message", "Test email sent to " + recipient + ". Check the inbox and spam folder.");
     }
 
-    public void notifyAdmin(String subject, String details) {
-        if (!isConfigured()) return;
+    public boolean notifyAdmin(String subject, String details) {
+        if (!isConfigured()) return false;
         String body = details + "\n\nTime (IST): " + IST_FORMAT.format(Instant.now())
                 + "\n\nEducational demo only — no real money or payment network.";
         try { send("HASDEO BANK Demo: " + subject, body); }
-        catch (Exception ex) { System.err.println("Admin email notification could not be sent: " + ex.getMessage()); }
+        catch (Exception ex) { System.err.println("Admin email notification could not be sent: " + ex.getMessage()); return false; }
+        return true;
     }
 
     private void send(String subject, String body) {

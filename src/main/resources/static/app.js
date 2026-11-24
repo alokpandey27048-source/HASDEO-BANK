@@ -1,6 +1,8 @@
 const $ = (id) => document.getElementById(id);
 let publicMaintenance = false;
 let sessionPingTimer = null;
+let balanceRefreshTimer = null;
+let balanceRefreshBusy = false;
 
 function openLogin(){openCustomerLogin();}
 function openCustomerLogin(){showAuthForm('customer');$('loginModal').classList.remove('hidden');}
@@ -13,7 +15,7 @@ function escapeHtml(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':
 function money(value){return new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR'}).format(Number(value)||0);}
 
 async function api(path,data,method='POST'){
-  const response=await fetch('/api'+path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json'},...(data!==undefined&&data!==null?{body:JSON.stringify(data)}:{})});
+  const response=await fetch('/api'+path,{method,credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json'},...(data!==undefined&&data!==null?{body:JSON.stringify(data)}:{})});
   const payload=await response.json().catch(()=>({}));
   if(!response.ok) throw new Error(payload.message||payload.error||'Something went wrong.');
   return payload;
@@ -49,13 +51,20 @@ async function enterDashboard(role){
   closeLogin();$('maintenanceScreen').classList.add('hidden');document.querySelector('main').classList.add('hidden');document.querySelector('footer').classList.add('hidden');
   $('dashboard').classList.remove('hidden');$('ownerPanel').classList.add('hidden');
   const isAdmin=role==='ADMIN';document.querySelectorAll('.owner-nav').forEach(el=>el.classList.toggle('hidden',!isAdmin));
-  $('transferForm').closest('.action-card').classList.toggle('hidden',isAdmin);
   $('customerAccountCard').classList.remove('hidden');
   $('dashboard').dataset.role=role;
   document.querySelector('.admin-pill').innerHTML='<span></span> '+(isAdmin?'Admin demo':'Customer demo');
   document.querySelector('.side .brand small').textContent=isAdmin?'ADMIN PORTAL':'CUSTOMER PORTAL';
   await loadAccount();if(isAdmin)await loadOwnerOverview();
   if(sessionPingTimer)clearInterval(sessionPingTimer);sessionPingTimer=setInterval(()=>api('/session/ping',{}).catch(()=>{}),60000);
+  if(balanceRefreshTimer)clearInterval(balanceRefreshTimer);
+  balanceRefreshTimer=setInterval(async()=>{
+    if(balanceRefreshBusy || $('dashboard').classList.contains('hidden')) return;
+    balanceRefreshBusy=true;
+    try { await loadAccount(); if(isAdmin && !$('ownerPanel').classList.contains('hidden')) await loadOwnerOverview(); }
+    catch(error) { console.warn('Automatic account refresh skipped:',error.message); }
+    finally { balanceRefreshBusy=false; }
+  },4000);
   window.scrollTo(0,0);toast(isAdmin?'Welcome to the admin dashboard.':'Welcome to your demo account.');
 }
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/login',{username:$('username').value.trim(),password:$('password').value});await enterDashboard('ADMIN');}catch(err){$('loginError').textContent=err.message;}});
@@ -67,7 +76,7 @@ async function loadAccount(){
   $('balance').textContent=money(data.balance);
   $('detailName').textContent=data.name||'—';$('detailCardName').textContent=(data.name||'CUSTOMER').toUpperCase();$('detailType').textContent=data.accountType||'Savings';$('detailStatus').textContent=data.status||'Active';$('accountNumberSummary').textContent='•••• '+String(data.cardNumber||'').slice(-4);$('accountTypeSummary').textContent=data.accountType||'Savings';$('accountStatusSummary').textContent=data.status||'Active';
   const card=String(data.cardNumber||'').replace(/(.{4})/g,'$1 ').trim();$('detailCardNumber').textContent=card||'—';$('detailCardCopy').textContent=card||'—';$('detailTransferCode').textContent=data.transferCode||'—';$('detailCodeCopy').textContent=data.transferCode||'—';
-  const customer=data.role==='CUSTOMER';$('customerAccountCard').classList.toggle('hidden',!customer);document.querySelectorAll('.owner-nav').forEach(el=>el.classList.toggle('hidden',customer));$('transferForm').closest('.action-card').classList.toggle('hidden',!customer);
+  const customer=data.role==='CUSTOMER';$('accountSectionEyebrow').textContent=customer?'YOUR ACCOUNT DETAILS':'ADMIN ACCOUNT DETAILS';$('accountSectionTitle').innerHTML=customer?'My <em>Account</em>':'Admin <em>Account</em>';$('customerAccountCard').classList.remove('hidden');document.querySelectorAll('.owner-nav').forEach(el=>el.classList.toggle('hidden',customer));$('transferForm').closest('.action-card').classList.remove('hidden');
   $('transactionRows').innerHTML=data.transactions.map(t=>`<tr><td>${escapeHtml(t.description)}</td><td>${escapeHtml(formatTransactionDate(t))}</td><td class="${t.type==='CREDIT'?'credit':'debit'}">${escapeHtml(t.type)}</td><td class="right ${t.type==='CREDIT'?'credit':'debit'}">${t.type==='CREDIT'?'+':'−'} ${money(t.amount)}</td></tr>`).join('')||'<tr><td colspan="4">No transactions yet.</td></tr>';
 }
 async function copyAccountDetail(id){const value=$(id).textContent.replace(/\s/g,'');try{await navigator.clipboard.writeText(value);toast('Copied to clipboard.');}catch(e){toast('Copy is unavailable in this browser.');}}
@@ -78,8 +87,8 @@ async function actionForm(formId,path,values){
 actionForm('depositForm','/deposit',()=>({amount:$('depositAmount').value}));
 actionForm('withdrawForm','/withdraw',()=>({amount:$('withdrawAmount').value}));
 let recipientLookupTimer=null;let confirmedRecipientCode='';
-$('transferRecipient').addEventListener('input',()=>{clearTimeout(recipientLookupTimer);const code=$('transferRecipient').value.trim();confirmedRecipientCode='';$('recipientPreview').textContent='Looking up customer…';if(!/^\d{4}$/.test(code)){$('recipientPreview').textContent='Enter the 4-digit transfer code.';return;}recipientLookupTimer=setTimeout(async()=>{try{const recipient=await api('/recipient/'+code,null,'GET');confirmedRecipientCode=code;$('recipientPreview').textContent='Recipient: '+recipient.name+' · Code '+recipient.transferCode;}catch(error){$('recipientPreview').textContent=error.message;}},300);});
-$('transferForm').addEventListener('submit',async e=>{e.preventDefault();const code=$('transferRecipient').value.trim();if(code!==confirmedRecipientCode){toast('Please enter and verify a valid recipient code first.');return;}try{const result=await api('/transfer',{amount:$('transferAmount').value,recipientCode:code});await loadAccount();$('transferForm').reset();confirmedRecipientCode='';$('recipientPreview').textContent='Enter a code to find the customer.';toast('Demo transfer sent to '+result.recipientName+'.');}catch(error){toast(error.message);}});
+$('transferRecipient').addEventListener('input',()=>{clearTimeout(recipientLookupTimer);const code=$('transferRecipient').value.trim();confirmedRecipientCode='';$('recipientPreview').textContent='Looking up customer…';if(!/^\d{4}$/.test(code)){$('recipientPreview').textContent='Enter the 4-digit transfer code.';return;}recipientLookupTimer=setTimeout(async()=>{try{const recipient=await api('/recipient/'+code,null,'GET');confirmedRecipientCode=code;$('recipientPreview').textContent='Recipient: '+recipient.name+' · '+(recipient.role==='ADMIN'?'Admin demo code ':'Customer demo code ')+recipient.transferCode;}catch(error){$('recipientPreview').textContent=error.message;}},300);});
+$('transferForm').addEventListener('submit',async e=>{e.preventDefault();const code=$('transferRecipient').value.trim();const button=$('transferForm').querySelector('button[type=submit],button:not([type])');if(code!==confirmedRecipientCode){toast('Please enter and verify a valid recipient code first.');return;}if(button?.disabled)return;if(button){button.disabled=true;button.textContent='Processing…';}try{const result=await api('/transfer',{amount:$('transferAmount').value,recipientCode:code});await loadAccount();$('transferForm').reset();confirmedRecipientCode='';$('recipientPreview').textContent='Enter a 4-digit demo code.';toast('Demo transfer sent to '+result.recipientName+'.');}catch(error){toast(error.message);}finally{if(button){button.disabled=false;button.textContent='Make demo transfer →';}}});
 
 function showDashboardOverview(){
   $('ownerPanel').classList.add('hidden');
@@ -96,7 +105,7 @@ async function loadOwnerOverview(){
   try{
     const data=await api('/owner/overview',null,'GET');
     $('ownerBalance').textContent=money(data.balance);$('ownerCustomers').textContent=data.customers;
-    $('ownerTransactions').textContent=data.transactions;$('ownerSessions').textContent=data.activeSessions;
+    $('ownerTransactions').textContent=data.transactions;$('ownerSessions').textContent=data.activeSessions;const adminCard=$('adminCardNumber');if(adminCard)adminCard.textContent='0000 0000 0000 2704';const adminCode=$('adminTransferCode');if(adminCode)adminCode.textContent='2704';
   }catch(error){console.warn(error.message);}
 }
 async function loadOwnerPanel(){
@@ -147,7 +156,27 @@ async function loadSupportTickets(){
   const rows=await api('/owner/support',null,'GET');
   $('supportTicketRows').innerHTML=rows.map(t=>`<tr><td>${escapeHtml(formatTransactionDate(t))}</td><td>${escapeHtml(t.name)}</td><td>${escapeHtml(t.email)}</td><td>${escapeHtml(t.category)}</td><td>${escapeHtml(t.message)}</td><td>${escapeHtml(t.status)}</td></tr>`).join('')||'<tr><td colspan="6">No support requests.</td></tr>';
 }
-$('supportForm').addEventListener('submit',async e=>{e.preventDefault();try{const result=await api('/support',{name:$('supportName').value.trim(),email:$('supportEmail').value.trim(),category:$('supportCategory').value,message:$('supportMessage').value.trim()});$('supportForm').reset();$('supportFeedback').textContent='Request received. Ticket #'+result.ticketId+'.';toast('Support request submitted.');}catch(error){$('supportFeedback').textContent=error.message;}});
+$('supportForm').addEventListener('submit',async e=>{e.preventDefault();try{const result=await api('/support',{name:$('supportName').value.trim(),email:$('supportEmail').value.trim(),category:$('supportCategory').value,message:$('supportMessage').value.trim()});$('supportForm').reset();$('supportFeedback').textContent='Request received. Ticket #'+result.ticketId+'. '+(result.emailSent?'Email sent to the site owner.':'Ticket saved; owner email is not configured or could not be sent.');toast('Support request submitted.');}catch(error){$('supportFeedback').textContent=error.message;}});
+
+const supportAiHistory=[];
+function addAiMessage(role,text){
+  const line=document.createElement('div');line.className='support-ai-message '+(role==='user'?'user':'assistant');
+  const label=document.createElement('b');label.textContent=role==='user'?'You':'HASDEO Help AI';
+  const content=document.createElement('p');content.textContent=text;
+  line.append(label,content);$('supportAiMessages').appendChild(line);$('supportAiMessages').scrollTop=$('supportAiMessages').scrollHeight;
+}
+$('supportAiForm').addEventListener('submit',async e=>{
+  e.preventDefault();const input=$('supportAiQuestion');const message=input.value.trim();if(!message)return;
+  const history=supportAiHistory.slice(-8);addAiMessage('user',message);supportAiHistory.push({role:'user',content:message});input.value='';
+  const button=$('supportAiSend');button.disabled=true;button.textContent='Thinking…';
+  try{
+    const result=await api('/support/ai',{message,history,name:$('supportAiName').value.trim(),email:$('supportAiEmail').value.trim()});
+    addAiMessage('assistant',result.answer);supportAiHistory.push({role:'assistant',content:result.answer});
+    if(result.escalated&&!result.emailSent) addAiMessage('assistant','Your ticket is saved in the admin Support panel. Owner email notifications need Gmail SMTP configuration.');
+  }catch(error){addAiMessage('assistant',error.message+' Please use the Contact Support form below.');}
+  finally{button.disabled=false;button.textContent='Send';input.focus();}
+});
+
 
 async function loadOwnerTransactions(){
   const rows=await api('/owner/transactions',null,'GET');
@@ -226,6 +255,7 @@ async function pollBackupStatus(){
 
 async function logout(){
   if(sessionPingTimer){clearInterval(sessionPingTimer);sessionPingTimer=null;}
+  if(balanceRefreshTimer){clearInterval(balanceRefreshTimer);balanceRefreshTimer=null;}
   try{await api('/logout',{});}catch(e){}
   $('dashboard').classList.add('hidden');$('ownerPanel').classList.add('hidden');$('dashboard').dataset.role='';$('transferForm').closest('.action-card').classList.remove('hidden');document.querySelectorAll('.owner-nav').forEach(el=>el.classList.remove('hidden'));
   document.querySelectorAll('.dash-main > :not(#ownerPanel)').forEach(el=>el.classList.remove('hidden'));
@@ -233,5 +263,11 @@ async function logout(){
   if(!publicMaintenance){document.querySelector('main').classList.remove('hidden');document.querySelector('footer').classList.remove('hidden');}
   toast('You have signed out.');
 }
+async function restoreSession(){
+  try{
+    const state=await api('/session',null,'GET');
+    if(state.authenticated) await enterDashboard(state.role);
+  }catch(error){console.warn('Could not restore the previous session:',error.message);}
+}
 window.addEventListener('keydown',e=>{if(e.key==='Escape')closeLogin();});
-checkPublicStatus();
+(async()=>{await checkPublicStatus();await restoreSession();})();

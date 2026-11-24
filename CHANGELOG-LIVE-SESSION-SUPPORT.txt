@@ -1,0 +1,30 @@
+HASDEO BANK update - live refresh and session restore
+
+1. Support form submissions are saved in the PostgreSQL support_tickets table and shown in Owner Panel > Support requests.
+2. If Gmail SMTP is configured in Render (MAIL_USERNAME and MAIL_APP_PASSWORD), support submissions also trigger an email to ADMIN_ALERT_EMAIL. If SMTP is not configured, the ticket remains saved in the database and is still visible in the Owner Panel.
+3. Added GET /api/session so the browser can restore the current admin/customer dashboard after a page reload while the server session cookie remains valid.
+4. Dashboard account details and transactions now refresh automatically every 4 seconds, so a recipient sees a completed demo transfer without manually refreshing.
+5. Explicit Sign out still invalidates the session. Session expiration, inactive customer status, or browser cookie removal can still require signing in again.
+6. Added Spring Session JDBC so authenticated sessions are stored in PostgreSQL rather than only in application memory. This helps preserve valid sessions across application restarts and deployments. The existing 30-minute inactivity timeout remains.
+
+Validation: app.js passed `node --check`. Maven build could not be run in this packaging environment because Maven is not installed. Run `mvn clean package` in Windows PowerShell before deployment. On first startup, Spring Session initializes its PostgreSQL session tables using the configured datasource.
+
+Educational demo only; not connected to real banking or payment networks.
+
+Combined update (24 Nov 2026)
+- Keep customer/admin login sessions in PostgreSQL via Spring Session JDBC and refresh dashboard data without HTTP caching.
+- Display the fictional admin demo card in the account dashboard and owner overview: 0000000000002704, demo code 2704.
+- Add a website-specific AI help assistant using the OpenAI Responses API. Unresolved or failed AI requests become support tickets and trigger owner email when Gmail SMTP is configured.
+- Direct Contact Support now reports whether the ticket email was sent; tickets remain in the admin Support panel even when email is unavailable.
+- Keep the OpenAI API key server-side in Render environment variables only.
+
+Additional corrections (24 Nov 2026)
+- Added demo transfers in all requested directions: customer-to-customer, customer-to-admin code 2704, and admin-to-customer.
+- Admin transfers now debit the fictional admin demo balance and credit the selected customer; customer-to-admin transfers do the reverse. Each transfer writes matching debit/credit transaction entries inside one database transaction.
+- Added account locking and sorted customer locks for customer-to-customer transfers to reduce concurrent balance conflicts.
+- Admin and customer dashboards both show the transfer form. Recipient lookup recognizes the fixed fictional admin code 2704.
+- Prevented ordinary rapid double-click submission in the browser while a transfer request is processing.
+- Owner login history now includes customer login and signup events from the activity log as well as admin session records.
+- Updated the optional AI model default to gpt-4.1-mini; an OpenAI API key is still required and must remain server-side.
+
+Validation performed in this packaging environment: Node.js syntax check passed for app.js. Maven is not installed here, so a Java/Maven build could not be run. Run `mvn clean package` on the Windows project before pushing/deploying.

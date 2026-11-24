@@ -156,3 +156,19 @@ Use a Gmail App Password from the Google Account that sends the alerts (2-Step V
 IMPORTANT
 ---------
 This is a school/educational simulation only. It is not a real bank and does not connect to payment networks. Do not enter real card details, CVV, PIN, OTP, Aadhaar or other sensitive banking information.
+
+
+AI SUPPORT CONFIGURATION (OPTIONAL)
+-----------------------------------
+The public Support Centre includes a website-specific AI assistant. To activate AI replies, add OPENAI_API_KEY in the Render service Environment settings. The default model is gpt-6.2-sol; optionally set OPENAI_MODEL to a model available to your API project. Never put the API key in app.js, index.html, or any public file. API usage may incur charges.
+
+Human escalation and the Contact Support form save tickets in the database and email the owner only when Gmail SMTP is configured using MAIL_USERNAME and MAIL_APP_PASSWORD. ADMIN_ALERT_EMAIL controls the destination. If email is not configured, tickets remain visible in Owner Panel > Support.
+
+ADMIN DEMO CARD
+---------------
+The admin demo card shown only after admin sign-in uses fictional card number 0000000000002704 and demo code 2704. It is not a real payment card and does not connect to real payment networks.
+
+
+RENDER SESSION COOKIE
+---------------------
+The deployed Render site uses HTTPS, so the session cookie is marked Secure by default. For local HTTP-only testing, set COOKIE_SECURE=false in the local environment; do not disable Secure on the public HTTPS deployment.
