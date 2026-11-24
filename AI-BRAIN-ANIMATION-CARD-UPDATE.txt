@@ -1,0 +1,17 @@
+HASDEO BANK - AI BRAIN + SUBTLE MOTION + DEMO CARD UPDATE
+
+Built on the previous COMPLETE PREMIUM + 100 CRORE + PAISE combined package.
+
+New additions:
+- Subtle CSS-only entrance and hover feedback. No continuous animation loops or heavy JavaScript animation.
+- Respects the user's operating-system reduced-motion preference.
+- Enhanced existing 16-digit fictional demo card visual using the same navy/gold palette. Card number generation and copy behavior are unchanged.
+- New Admin Panel > AI Brain section.
+- Admin can set the creator/owner name (default: Alok) and save up to 5,000 characters of persistent AI knowledge, FAQs, preferred answers and website instructions.
+- The AI uses this context for new questions and still answers other normal questions independently.
+- Core privacy/security rules remain in force; do not put passwords, API keys, OTPs or private customer data into the AI knowledge field.
+- Updated AI website facts to reflect the ₹100 crore per-transaction cap and two-decimal paise support.
+
+The AI requires OPENAI_API_KEY configured on the Render service. Admin AI settings are stored in the existing site_settings database row; Hibernate ddl-auto=update adds the new columns on deployment.
+
+This is an educational demo website, not a real bank or payment system. Run `mvn clean package` locally before pushing/deploying. Java/Maven build and live Render deployment have not been verified in this packaging environment.

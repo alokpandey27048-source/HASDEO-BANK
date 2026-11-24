@@ -3,6 +3,10 @@ let publicMaintenance = false;
 let sessionPingTimer = null;
 let balanceRefreshTimer = null;
 let balanceRefreshBusy = false;
+let latestAccountData = null;
+let latestTransactions = [];
+let currentAccountRole = 'CUSTOMER';
+let ownerAnalyticsLoaded = false;
 
 function openLogin(){openCustomerLogin();}
 function openCustomerLogin(){showAuthForm('customer');$('loginModal').classList.remove('hidden');}
@@ -12,7 +16,14 @@ function showAuthForm(mode){const forms={customer:'customerLoginForm',signup:'si
 function closeLogin(){ $('loginModal').classList.add('hidden'); }
 function toast(message){ const el=$('toast'); el.textContent=message; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),2800); }
 function escapeHtml(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function money(value){return new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR'}).format(Number(value)||0);}
+function money(value){
+  const n=Number(value)||0;
+  const exact=new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',minimumFractionDigits:2,maximumFractionDigits:2}).format(n);
+  const crore=10000000, lakh=100000;
+  if(Math.abs(n)>=crore) return `${exact} (${new Intl.NumberFormat('en-IN',{maximumFractionDigits:2}).format(n/crore)} Cr)`;
+  if(Math.abs(n)>=lakh) return `${exact} (${new Intl.NumberFormat('en-IN',{maximumFractionDigits:2}).format(n/lakh)} Lakh)`;
+  return exact;
+}
 
 async function api(path,data,method='POST'){
   const response=await fetch('/api'+path,{method,credentials:'same-origin',cache:'no-store',headers:{'Content-Type':'application/json'},...(data!==undefined&&data!==null?{body:JSON.stringify(data)}:{})});
@@ -56,6 +67,7 @@ async function enterDashboard(role){
   document.querySelector('.admin-pill').innerHTML='<span></span> '+(isAdmin?'Admin demo':'Customer demo');
   document.querySelector('.side .brand small').textContent=isAdmin?'ADMIN PORTAL':'CUSTOMER PORTAL';
   await loadAccount();if(isAdmin)await loadOwnerOverview();
+  const savedLanguage=localStorage.getItem('hasdeoLanguage');if(savedLanguage&&$('languageSelect')){$('languageSelect').value=savedLanguage;$('languageSelect').dispatchEvent(new Event('change'));}
   if(sessionPingTimer)clearInterval(sessionPingTimer);sessionPingTimer=setInterval(()=>api('/session/ping',{}).catch(()=>{}),60000);
   if(balanceRefreshTimer)clearInterval(balanceRefreshTimer);
   balanceRefreshTimer=setInterval(async()=>{
@@ -73,12 +85,53 @@ $('signupForm').addEventListener('submit',async e=>{e.preventDefault();if($('sig
 
 async function loadAccount(){
   const data=await api('/account',null,'GET');
+  latestAccountData=data; latestTransactions=data.transactions||[]; currentAccountRole=data.role||'CUSTOMER';
   $('balance').textContent=money(data.balance);
   $('detailName').textContent=data.name||'—';$('detailCardName').textContent=(data.name||'CUSTOMER').toUpperCase();$('detailType').textContent=data.accountType||'Savings';$('detailStatus').textContent=data.status||'Active';$('accountNumberSummary').textContent='•••• '+String(data.cardNumber||'').slice(-4);$('accountTypeSummary').textContent=data.accountType||'Savings';$('accountStatusSummary').textContent=data.status||'Active';
   const card=String(data.cardNumber||'').replace(/(.{4})/g,'$1 ').trim();$('detailCardNumber').textContent=card||'—';$('detailCardCopy').textContent=card||'—';$('detailTransferCode').textContent=data.transferCode||'—';$('detailCodeCopy').textContent=data.transferCode||'—';
   const customer=data.role==='CUSTOMER';$('accountSectionEyebrow').textContent=customer?'YOUR ACCOUNT DETAILS':'ADMIN ACCOUNT DETAILS';$('accountSectionTitle').innerHTML=customer?'My <em>Account</em>':'Admin <em>Account</em>';$('customerAccountCard').classList.remove('hidden');document.querySelectorAll('.owner-nav').forEach(el=>el.classList.toggle('hidden',customer));$('transferForm').closest('.action-card').classList.remove('hidden');
-  $('transactionRows').innerHTML=data.transactions.map(t=>`<tr><td>${escapeHtml(t.description)}</td><td>${escapeHtml(formatTransactionDate(t))}</td><td class="${t.type==='CREDIT'?'credit':'debit'}">${escapeHtml(t.type)}</td><td class="right ${t.type==='CREDIT'?'credit':'debit'}">${t.type==='CREDIT'?'+':'−'} ${money(t.amount)}</td></tr>`).join('')||'<tr><td colspan="4">No transactions yet.</td></tr>';
+  renderTransactions(); renderNotifications(); renderQrCode(); updateSavingsGoal();
+  $('passwordChangeForm').classList.toggle('hidden',!customer);
 }
+function renderTransactions(){
+  const query=($('transactionSearch')?.value||'').trim().toLowerCase();const type=$('transactionType')?.value||'ALL';
+  const rows=latestTransactions.filter(t=>(type==='ALL'||t.type===type)&&(!query||String(t.description).toLowerCase().includes(query)||String(t.id).toLowerCase().includes(query)||String(t.amount).includes(query)));
+  $('transactionRows').innerHTML=rows.map(t=>`<tr><td>${escapeHtml(t.description)}</td><td>${escapeHtml(formatTransactionDate(t))}</td><td class="${t.type==='CREDIT'?'credit':'debit'}">${escapeHtml(t.type)}</td><td class="right ${t.type==='CREDIT'?'credit':'debit'}">${t.type==='CREDIT'?'+':'−'} ${money(t.amount)}</td></tr>`).join('')||'<tr><td colspan="4">No matching transactions.</td></tr>';
+}
+function renderNotifications(){
+  const rows=latestTransactions.slice(0,8);$('notificationCount').textContent=rows.length;
+  $('notificationList').innerHTML=rows.map(t=>`<div class="notification-item"><b>${escapeHtml(t.type==='CREDIT'?'Money added':'Money deducted')}</b><span>${escapeHtml(t.description)} · ${money(t.amount)}</span><small>${escapeHtml(formatTransactionDate(t))}</small></div>`).join('')||'No alerts yet.';
+}
+function renderQrCode(){
+  const box=$('accountQr');if(!box||!latestAccountData)return;box.innerHTML='';const code=String(latestAccountData.transferCode||'');$('qrCodeLabel').textContent='Demo transfer code: '+code;
+  if(window.QRCode&&code)new QRCode(box,{text:'HASDEO-BANK-DEMO:'+code,width:128,height:128,colorDark:'#102b4b',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});
+  else box.textContent='QR library unavailable';
+}
+function updateSavingsGoal(){
+  const goal=JSON.parse(localStorage.getItem('hasdeoDemoGoal')||'null');const bar=$('goalProgressBar');if(!bar)return;
+  if(!goal){$('goalProgressText').textContent='No savings goal set.';bar.style.width='0%';return;}
+  const balance=Number(latestAccountData?.balance||0),pct=Math.min(100,Math.round(balance/Math.max(1,Number(goal.amount))*100));
+  $('goalName').value=goal.name;$('goalAmount').value=goal.amount;bar.style.width=pct+'%';$('goalProgressText').textContent=`${goal.name}: ${money(balance)} / ${money(goal.amount)} (${pct}%)`;
+}
+$('transactionSearch').addEventListener('input',renderTransactions);$('transactionType').addEventListener('change',renderTransactions);
+$('downloadStatement').addEventListener('click',()=>{
+  const rows=[['Transaction ID','Description','Date & Time (IST)','Type','Amount'],...latestTransactions.map(t=>[t.id,t.description,formatTransactionDate(t),t.type,t.amount])];
+  const csv=rows.map(row=>row.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');
+  const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='HASDEO-BANK-demo-statement.csv';a.click();URL.revokeObjectURL(url);
+});
+$('printStatement').addEventListener('click',()=>{
+  const w=window.open('','_blank','width=900,height=700');if(!w){toast('Allow pop-ups to print your statement.');return;}
+  const rows=latestTransactions.map(t=>`<tr><td>${escapeHtml(t.id)}</td><td>${escapeHtml(t.description)}</td><td>${escapeHtml(formatTransactionDate(t))}</td><td>${escapeHtml(t.type)}</td><td>${money(t.amount)}</td></tr>`).join('');
+  w.document.write(`<!doctype html><html><head><title>HASDEO BANK Demo Statement</title><style>body{font:14px Arial;padding:28px;color:#102b4b}h1{font-family:Georgia}table{border-collapse:collapse;width:100%;margin-top:24px}td,th{border-bottom:1px solid #ddd;padding:10px;text-align:left;font-size:12px}.note{color:#777;font-size:11px}</style></head><body><h1>HASDEO BANK</h1><h2>Demo account statement</h2><p>${escapeHtml(latestAccountData?.name||'Demo account')} · ${escapeHtml(latestAccountData?.accountType||'')}</p><p>Available demo balance: ${money(latestAccountData?.balance||0)}</p><table><thead><tr><th>ID</th><th>Description</th><th>Date &amp; time (IST)</th><th>Type</th><th>Amount</th></tr></thead><tbody>${rows}</tbody></table><p class="note">Educational demo only. Not a real bank statement or proof of funds.</p><script>window.onload=()=>window.print()<\/script></body></html>`);w.document.close();
+});
+$('goalForm').addEventListener('submit',e=>{e.preventDefault();const amount=Number($('goalAmount').value);if(!Number.isFinite(amount)||amount<=0){toast('Enter a valid goal amount.');return;}localStorage.setItem('hasdeoDemoGoal',JSON.stringify({name:$('goalName').value.trim(),amount}));updateSavingsGoal();toast('Savings goal saved in this browser.');});
+$('passwordChangeForm').addEventListener('submit',async e=>{e.preventDefault();try{const r=await api('/profile/password',{currentPassword:$('currentDemoPassword').value,newPassword:$('newDemoPassword').value});$('passwordFeedback').textContent=r.message;$('passwordChangeForm').reset();toast(r.message);}catch(err){$('passwordFeedback').textContent=err.message;}});
+$('feedbackForm').addEventListener('submit',async e=>{e.preventDefault();try{const r=await api('/feedback',{rating:$('feedbackRating').value,message:$('feedbackMessage').value});$('feedbackResult').textContent=r.message;$('feedbackMessage').value='';toast(r.message);}catch(err){$('feedbackResult').textContent=err.message;}});
+$('themeToggle').addEventListener('click',()=>{document.body.classList.toggle('theme-dark');const dark=document.body.classList.contains('theme-dark');localStorage.setItem('hasdeoTheme',dark?'dark':'light');$('themeToggle').textContent=dark?'☀ Light mode':'☾ Dark mode';});
+if(localStorage.getItem('hasdeoTheme')==='dark'){document.body.classList.add('theme-dark');$('themeToggle').textContent='☀ Light mode';}
+$('notificationToggle').addEventListener('click',()=>$('notificationPanel').classList.toggle('hidden'));$('closeNotifications').addEventListener('click',()=>$('notificationPanel').classList.add('hidden'));
+const translations={hi:{'Your financial overview':'आपका वित्तीय अवलोकन','Recent transactions':'हाल के लेन-देन','Set a savings goal':'बचत लक्ष्य तय करें','Account settings':'खाता सेटिंग्स'},hinglish:{'Your financial overview':'Aapka financial overview','Recent transactions':'Recent transactions','Set a savings goal':'Savings goal set karein','Account settings':'Account settings'},pa:{'Your financial overview':'ਤੁਹਾਡਾ ਵਿੱਤੀ ਵੇਰਵਾ','Recent transactions':'ਹਾਲੀਆ ਲੈਣ-ਦੇਣ','Set a savings goal':'ਬਚਤ ਦਾ ਟੀਚਾ ਬਣਾਓ','Account settings':'ਖਾਤਾ ਸੈਟਿੰਗਾਂ'}};
+$('languageSelect').addEventListener('change',()=>{const lang=$('languageSelect').value;localStorage.setItem('hasdeoLanguage',lang);const map=translations[lang]||{};const h1=document.querySelector('.dash-top h1');if(h1)h1.textContent=map['Your financial overview']||'Good to see you.';const tx=document.querySelector('#transactions h2');if(tx)tx.innerHTML=(map['Recent transactions']||'Recent')+' <em></em>';const goals=document.querySelector('#goalForm')?.closest('.feature-card')?.querySelector('h3');if(goals)goals.textContent=map['Set a savings goal']||'Set a savings goal';const profile=document.querySelector('#passwordChangeForm')?.closest('.feature-card')?.querySelector('h3');if(profile)profile.textContent=map['Account settings']||'Account settings';});
 async function copyAccountDetail(id){const value=$(id).textContent.replace(/\s/g,'');try{await navigator.clipboard.writeText(value);toast('Copied to clipboard.');}catch(e){toast('Copy is unavailable in this browser.');}}
 
 async function actionForm(formId,path,values){
@@ -105,9 +158,16 @@ async function loadOwnerOverview(){
   try{
     const data=await api('/owner/overview',null,'GET');
     $('ownerBalance').textContent=money(data.balance);$('ownerCustomers').textContent=data.customers;
-    $('ownerTransactions').textContent=data.transactions;$('ownerSessions').textContent=data.activeSessions;const adminCard=$('adminCardNumber');if(adminCard)adminCard.textContent='0000 0000 0000 2704';const adminCode=$('adminTransferCode');if(adminCode)adminCode.textContent='2704';
+    $('ownerTransactions').textContent=data.transactions;$('ownerSessions').textContent=data.activeSessions;if(!ownerAnalyticsLoaded) await renderOwnerAnalytics();const adminCard=$('adminCardNumber');if(adminCard)adminCard.textContent='0000 0000 0000 2704';const adminCode=$('adminTransferCode');if(adminCode)adminCode.textContent='2704';
   }catch(error){console.warn(error.message);}
 }
+async function renderOwnerAnalytics(){
+  const target=$('ownerAnalytics');if(!target)return;try{const rows=await api('/owner/transactions',null,'GET');const now=new Date();const months=[];for(let i=5;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);months.push({key:d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'),label:d.toLocaleDateString('en-IN',{month:'short'}),credits:0,debits:0});}
+    rows.forEach(t=>{const d=new Date(t.timestamp||'');if(Number.isNaN(d.getTime()))return;const key=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');const m=months.find(x=>x.key===key);if(m){if(t.type==='CREDIT')m.credits+=Number(t.amount)||0;else m.debits+=Number(t.amount)||0;}});
+    const max=Math.max(1,...months.flatMap(m=>[m.credits,m.debits]));target.innerHTML=months.map(m=>`<div class="analytics-month"><b>${m.label}</b><div class="analytics-track"><span class="analytics-credit" style="width:${Math.round(m.credits/max*100)}%"></span></div><div class="analytics-track"><span class="analytics-debit" style="width:${Math.round(m.debits/max*100)}%"></span></div><small>In ${money(m.credits)} · Out ${money(m.debits)}</small></div>`).join('');ownerAnalyticsLoaded=true;
+  }catch(e){target.textContent='Analytics are temporarily unavailable.';}
+}
+$('downloadMonthlyReport').addEventListener('click',async()=>{try{const rows=await api('/owner/transactions',null,'GET');const now=new Date();const selected=rows.filter(t=>{const d=new Date(t.timestamp||'');return !Number.isNaN(d.getTime())&&d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();});const data=[['ID','Description','Date & Time (IST)','Type','Amount'],...selected.map(t=>[t.id,t.description,formatTransactionDate(t),t.type,t.amount])];const csv=data.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');const url=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='HASDEO-BANK-admin-monthly-report.csv';a.click();URL.revokeObjectURL(url);toast('Monthly demo report downloaded.');}catch(e){toast(e.message);}});
 async function loadOwnerPanel(){
   await loadOwnerOverview();
   const active=document.querySelector('.owner-tab.active')?.dataset.ownerTab||'overview';
@@ -125,6 +185,7 @@ async function loadOwnerTab(tab){
     if(tab==='settings') await loadSettings();
     if(tab==='backup') await loadBackupStatus();
     if(tab==='support') await loadSupportTickets();
+    if(tab==='ai') await loadAiBrain();
   }catch(error){toast(error.message);}
 }
 document.querySelectorAll('.owner-tab').forEach(button=>button.addEventListener('click',()=>loadOwnerTab(button.dataset.ownerTab)));
@@ -220,6 +281,21 @@ $('testMailButton').addEventListener('click',async()=>{
 });
 $('settingsForm').addEventListener('submit',async e=>{
   e.preventDefault();try{await api('/owner/settings',{siteTitle:$('siteTitle').value,announcement:$('siteAnnouncement').value});await checkPublicStatus();toast('Website settings saved.');}catch(error){toast(error.message);}
+});
+async function loadAiBrain(){
+  const data=await api('/owner/settings',null,'GET');
+  $('aiCreatorName').value=data.aiCreatorName||'Alok';
+  $('aiCustomKnowledge').value=data.aiCustomKnowledge||'';
+  $('aiBrainFeedback').textContent='Your saved AI guidance is active for new support questions.';
+}
+$('saveAiBrain').addEventListener('click',async()=>{
+  const button=$('saveAiBrain');button.disabled=true;button.textContent='Saving…';
+  try{
+    await api('/owner/settings',{aiCreatorName:$('aiCreatorName').value.trim(),aiCustomKnowledge:$('aiCustomKnowledge').value});
+    $('aiBrainFeedback').textContent='Saved. New AI conversations will use these instructions.';
+    toast('AI knowledge saved.');
+  }catch(error){$('aiBrainFeedback').textContent=error.message;}
+  finally{button.disabled=false;button.textContent='Save AI knowledge';}
 });
 async function loadBackupStatus(){
   const data=await api('/owner/backup-status',null,'GET');

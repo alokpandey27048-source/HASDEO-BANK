@@ -28,3 +28,43 @@ Additional corrections (24 Nov 2026)
 - Updated the optional AI model default to gpt-4.1-mini; an OpenAI API key is still required and must remain server-side.
 
 Validation performed in this packaging environment: Node.js syntax check passed for app.js. Maven is not installed here, so a Java/Maven build could not be run. Run `mvn clean package` on the Windows project before pushing/deploying.
+
+
+FEATURE EXPANSION (2026-11-24)
+- Preserved the existing navy/gold public site and dashboard structure.
+- Expanded HASDEO Help AI instructions to support English, Hindi, Hinglish, and Punjabi, conversational follow-ups, and direct answers for common demo workflows.
+- AI service outages or missing API configuration no longer automatically create support tickets; users receive a clear retry/contact-support message. Tickets are created only for AI escalation or explicit Contact Support/Feedback submissions.
+- Added transaction search and credit/debit filters.
+- Added CSV transaction statement download and print-to-PDF statement flow.
+- Added a browser-local savings goal tracker.
+- Added demo transfer-code QR display (requires QRCode CDN availability).
+- Added customer demo-password change with current-password verification.
+- Added in-dashboard transaction alert list, dark mode, and a basic language switch for key dashboard headings.
+- Added customer feedback/rating submission, stored in the admin Support panel.
+- Added six-month admin activity visualization and current-month CSV report (based on latest 100 transaction records returned by the existing admin endpoint).
+- Existing maintenance mode, website announcement, customer management, login history, activity logs, SMTP notifications, and Google Drive backup remain in place.
+
+VALIDATION NOTES
+- JavaScript syntax check: passed with Node.js.
+- HTML ID check: no duplicate IDs and all app.js ID references resolve.
+- Maven is not installed in this build environment, so Java compilation and live deployment were not verified here. Run `mvn clean package` locally before pushing.
+- AI answers require OPENAI_API_KEY to be configured in the Render service environment. Never place the API key in frontend files or commit it to Git.
+- This remains a fictional educational demo; no real money, bank, or payment network is connected.
+
+
+Amount limits and formatting update:
+- Deposit, withdrawal, and demo transfer amount capped at INR 100 crore per transaction.
+- Amounts accept paise up to two decimal places (example: 0.78).
+- Account balances use expanded decimal precision; transaction amounts support up to INR 100 crore.
+- Amount displays retain exact Indian comma grouping and add Lakh/Crore notation for large values.
+- Educational demo only; not a real-money banking service.
+
+
+2026-11-24 - AI Brain, subtle motion and demo card polish
+- Added Admin Panel > AI Brain to save creator name and custom FAQ/knowledge context.
+- AI context is persistent in SiteSettings and is applied to new support requests.
+- Preserved core privacy and security rules; admin-provided text cannot override them.
+- Updated AI website facts for ₹100 crore transaction caps and paise support.
+- Added subtle CSS-only transitions and reduced-motion support.
+- Enhanced existing fictional 16-digit demo card appearance without changing card generation or behavior.
+- No continuous animation loops or extra animation libraries added.

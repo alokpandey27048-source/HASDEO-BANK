@@ -19,7 +19,7 @@ public class DemoCustomer {
     @Column(name="password_hash", length=300) private String passwordHash;
     @Column(name="card_number", unique=true, length=16) private String cardNumber;
     @Column(name="transfer_code", unique=true, length=4) private String transferCode;
-    @Column(precision=14, scale=2) private BigDecimal balance = BigDecimal.ZERO;
+    @Column(precision=20, scale=2) private BigDecimal balance = BigDecimal.ZERO;
 
     protected DemoCustomer() {}
     public DemoCustomer(String customerCode,String name,String contactLabel,String emailLabel,String accountType) {

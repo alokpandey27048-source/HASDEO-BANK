@@ -12,7 +12,7 @@ public class AccountState {
     @Id
     private Long id;
 
-    @Column(nullable = false, precision = 14, scale = 2)
+    @Column(nullable = false, precision = 20, scale = 2)
     private BigDecimal balance;
 
     protected AccountState() {}

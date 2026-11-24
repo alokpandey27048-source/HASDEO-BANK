@@ -4,7 +4,7 @@ import jakarta.persistence.*; import java.math.BigDecimal; import java.time.Inst
 public class BankTransaction {
  @Id @GeneratedValue(strategy=GenerationType.IDENTITY) private Long id;
  @Column(nullable=false,length=180) private String description;
- @Column(nullable=false,precision=14,scale=2) private BigDecimal amount;
+ @Column(nullable=false,precision=12,scale=2) private BigDecimal amount;
  @Column(nullable=false,length=10) private String type;
  @Column(name="created_at",nullable=false) private Instant createdAt;
  @Column(name="customer_id") private Long customerId;

@@ -26,3 +26,8 @@
 .announcement-bar{background:#f2eddf;color:#6b5937;text-align:center;padding:10px 6%;font-size:10px;letter-spacing:.4px;border-bottom:1px solid #e5dcc8}
 
 .backup-status.success{color:#45805e}.backup-status.failed{color:#a45b42}
+.analytics-bars{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;padding:12px 0}.analytics-month{min-width:0;display:grid;gap:6px}.analytics-month>b{font:12px Georgia;color:#17364b}.analytics-track{height:8px;background:#edf0ed;overflow:hidden}.analytics-track span{display:block;height:100%;min-width:0}.analytics-credit{background:#4e9c7a}.analytics-debit{background:#bd8662}.analytics-month small{font-size:9px;line-height:1.5;color:#7b898e}@media(max-width:700px){.analytics-bars{grid-template-columns:repeat(3,minmax(0,1fr))}}
+
+
+/* AI Brain panel additions — keeps the existing owner-panel palette and spacing. */
+.ai-brain-card{max-width:760px}.ai-brain-card>p{max-width:660px}.ai-brain-card label{margin-top:5px}.ai-brain-card textarea{width:100%;line-height:1.55}.ai-brain-hint{font-size:10px;color:#78868c;line-height:1.6}.ai-brain-card #aiBrainFeedback{font-size:10px;color:#43815e}

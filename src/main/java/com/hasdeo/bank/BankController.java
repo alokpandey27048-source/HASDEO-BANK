@@ -177,7 +177,7 @@ public class BankController {
 
     @PostMapping("/deposit") @Transactional
     public Map<String,Object> deposit(@RequestBody Map<String,Object> body,HttpSession session) {
-        requireLogin(session);BigDecimal amount=getAmount(body);if(amount.signum()<=0||amount.compareTo(new BigDecimal("1000000.00"))>0)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter a valid amount.");
+        requireLogin(session);BigDecimal amount=getAmount(body);if(amount.signum()<=0||amount.compareTo(new BigDecimal("1000000000.00"))>0)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter a valid amount.");
         DemoCustomer c=currentCustomer(session); if(c!=null)c=customerRepository.findByIdForUpdate(c.getId()).orElseThrow(); Instant now=Instant.now();
         if(c!=null){c.setBalance(c.getBalance().add(amount));transactionRepository.save(new BankTransaction("Demo deposit",amount,"CREDIT",now,c.getId()));}
         else {AccountState a=lockedAccount();a.setBalance(a.getBalance().add(amount));transactionRepository.save(new BankTransaction("Cash deposit",amount,"CREDIT",now));}
@@ -204,7 +204,7 @@ public class BankController {
         BigDecimal amount=getAmount(body);
         String code=String.valueOf(body.getOrDefault("recipientCode","")).trim();
         if(!code.matches("\\d{4}")) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter the recipient's 4-digit demo code.");
-        if(amount.signum()<=0 || amount.compareTo(new BigDecimal("1000000.00"))>0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter a valid demo amount.");
+        if(amount.signum()<=0 || amount.compareTo(new BigDecimal("1000000000.00"))>0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter a valid demo amount.");
         DemoCustomer sender=currentCustomer(session);
         Instant now=Instant.now();
 
@@ -253,6 +253,33 @@ public class BankController {
         return Map.of("success",true,"balance",sender.getBalance(),"recipientName",receiver.getName());
     }
 
+    @PostMapping("/profile/password") @Transactional
+    public Map<String,Object> changeCustomerPassword(@RequestBody Map<String,String> body,HttpSession session) {
+        requireLogin(session);
+        DemoCustomer customer=currentCustomer(session);
+        if(customer==null) throw new ResponseStatusException(HttpStatus.FORBIDDEN,"Customer profile settings are available for demo customer accounts only.");
+        String current=body.getOrDefault("currentPassword","");
+        String next=body.getOrDefault("newPassword","");
+        if(!verifyPassword(current,customer.getPasswordHash())) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Current password is incorrect.");
+        if(next.length()<8 || next.length()>100) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"New password must be 8-100 characters.");
+        customer.setPasswordHash(hashPassword(next));
+        log(session,"CUSTOMER_PASSWORD_CHANGED","Customer changed their demo account password");
+        return Map.of("success",true,"message","Demo account password updated.");
+    }
+
+    @PostMapping("/feedback") @Transactional
+    public Map<String,Object> submitFeedback(@RequestBody Map<String,String> body,HttpSession session) {
+        requireLogin(session);
+        int rating;
+        try { rating=Integer.parseInt(body.getOrDefault("rating","5")); } catch(Exception ex) { rating=5; }
+        if(rating<1 || rating>5) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Choose a rating from 1 to 5.");
+        String message=optionalText(body.getOrDefault("message",""),800);
+        String who=actor(session);
+        SupportTicket ticket=supportRepository.save(new SupportTicket(who,"", "Website feedback · "+rating+"/5",message.isBlank()?"Rating: "+rating+"/5":"Rating: "+rating+"/5\n"+message));
+        mailService.notifyAdmin("HASDEO BANK feedback #"+ticket.getId(),"From: "+who+"\nRating: "+rating+"/5\n"+message);
+        return Map.of("success",true,"message","Thanks! Your feedback has been saved.");
+    }
+
     @PostMapping("/support") @Transactional
     public Map<String,Object> createSupportTicket(@RequestBody Map<String,String> body) {
         String name=requiredText(body,"name",100), email=requiredText(body,"email",120), category=requiredText(body,"category",40), message=requiredText(body,"message",1200);
@@ -279,17 +306,18 @@ public class BankController {
             }
         }
         try {
-            com.hasdeo.bank.service.SupportAiService.AiReply reply=supportAiService.reply(history,message);
+            SiteSettings aiSettings=getSettings();
+            com.hasdeo.bank.service.SupportAiService.AiReply reply=supportAiService.reply(history,message,aiSettings.getAiCreatorName(),aiSettings.getAiCustomKnowledge());
             if(!reply.needsHuman()) return Map.of("success",true,"answer",reply.answer(),"escalated",false);
             String transcript=history.stream().map(m->m.get("role")+": "+m.get("content")).reduce("",(a,b)->a+b+"\n")+"Customer: "+message+"\nAI: "+reply.answer();
             SupportTicket ticket=supportRepository.save(new SupportTicket(name.isBlank()?"Website visitor":name,email,"AI escalation",transcript.substring(0,Math.min(1200,transcript.length()))));
             boolean emailSent=mailService.notifyAdmin("AI support needs human help #"+ticket.getId(),"Name: "+(name.isBlank()?"Not provided":name)+"\nEmail: "+(email.isBlank()?"Not provided":email)+"\nConversation:\n"+transcript);
             return Map.of("success",true,"answer",reply.answer()+"\n\nI've forwarded this to the website support team. Reference ticket #"+ticket.getId()+".","escalated",true,"ticketId",ticket.getId(),"emailSent",emailSent);
         } catch(Exception ex) {
-            String transcript="Customer: "+message+"\nAI status: "+(supportAiService.isConfigured()?"Unable to answer":"AI API key is not configured");
-            SupportTicket ticket=supportRepository.save(new SupportTicket(name.isBlank()?"Website visitor":name,email,"AI unavailable",transcript));
-            boolean emailSent=mailService.notifyAdmin("AI support fallback #"+ticket.getId(),"Name: "+(name.isBlank()?"Not provided":name)+"\nEmail: "+(email.isBlank()?"Not provided":email)+"\nQuestion: "+message+"\nDetails: "+ex.getMessage());
-            return Map.of("success",true,"answer","I couldn't confidently solve this right now. I've saved your question as support ticket #"+ticket.getId()+". You can also use Contact Support below.","escalated",true,"ticketId",ticket.getId(),"emailSent",emailSent);
+            String answer = !supportAiService.isConfigured()
+                    ? "AI abhi configure nahi hai. Website owner ko server par OPENAI_API_KEY set karna hoga. Tab tak Contact Support form use kar sakte ho. / The AI service is not configured yet; please use Contact Support for now."
+                    : "I couldn't reach the AI service just now. Please try again in a moment. If this keeps happening, you can choose Contact Support below. / AI service abhi respond nahi kar rahi; thodi der baad try karo.";
+            return Map.of("success",true,"answer",answer,"escalated",false,"available",supportAiService.isConfigured());
         }
     }
 
@@ -364,7 +392,9 @@ public class BankController {
         requireAdmin(session); SiteSettings s=getSettings();
         if(body.containsKey("siteTitle")) s.setSiteTitle(requiredText(body,"siteTitle",100));
         if(body.containsKey("announcement")) s.setAnnouncement(optionalText(body.get("announcement"),240));
-        log(session,"WEBSITE_SETTINGS_UPDATED","Updated website settings"); return settingsMap(s);
+        if(body.containsKey("aiCreatorName")) s.setAiCreatorName(optionalText(body.get("aiCreatorName"),80));
+        if(body.containsKey("aiCustomKnowledge")) s.setAiCustomKnowledge(optionalText(body.get("aiCustomKnowledge"),5000));
+        log(session,"WEBSITE_SETTINGS_UPDATED","Updated website and AI assistant settings"); return settingsMap(s);
     }
 
     @PostMapping("/owner/maintenance") @Transactional
@@ -418,7 +448,7 @@ public class BankController {
     }
     private SiteSettings getSettings(){return settingsRepository.findById(1L).orElseGet(()->settingsRepository.save(new SiteSettings(1L)));}
     private AccountState lockedAccount(){return accountRepository.findByIdForUpdate(1L).orElseThrow(()->new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,"Demo account is not initialized."));}
-    private BigDecimal getAmount(Map<String,Object> body){try{BigDecimal v=new BigDecimal(String.valueOf(body.get("amount"))).setScale(2,RoundingMode.UNNECESSARY);if(v.precision()>14)throw new NumberFormatException();return v;}catch(Exception ex){throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter a valid amount with up to two decimal places.");}}
+    private BigDecimal getAmount(Map<String,Object> body){try{BigDecimal v=new BigDecimal(String.valueOf(body.get("amount"))).setScale(2,RoundingMode.UNNECESSARY);if(v.signum()<=0||v.compareTo(new BigDecimal("1000000000.00"))>0)throw new NumberFormatException();return v;}catch(Exception ex){throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter an amount from ₹0.01 up to ₹100 crore, with up to two decimal places.");}}
     private String requiredText(Map<String,String> body,String key,int max){String v=body.getOrDefault(key,"").trim();if(v.isEmpty()||v.length()>max)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter a valid "+key+" (max "+max+" characters).");return v;}
     private String optionalText(String v,int max){String s=v==null?"":v.trim();if(s.length()>max)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Text is too long (max "+max+" characters).");return s;}
     private String safe(String v){return v==null?"":v;}
@@ -426,5 +456,5 @@ public class BankController {
     private Map<String,Object> timeMap(Map<String,Object> base,Instant instant){Map<String,Object> m=new LinkedHashMap<>(base);m.put("timestamp",instant.atZone(INDIA_ZONE).toOffsetDateTime().toString());m.put("date",formatTime(instant));return m;}
     private Map<String,Object> toTransactionMap(BankTransaction t){Map<String,Object> m=new LinkedHashMap<>();m.put("id","HB"+t.getId());m.put("description",t.getDescription());m.put("amount",t.getAmount());m.put("type",t.getType());return timeMap(m,t.getCreatedAt());}
     private Map<String,Object> toCustomerMap(DemoCustomer c){Map<String,Object> m=new LinkedHashMap<>();m.put("id",c.getId());m.put("customerCode",c.getCustomerCode());m.put("name",c.getName());m.put("contact",safe(c.getContactLabel()));m.put("email",safe(c.getEmailLabel()));m.put("username",safe(c.getUsername()));m.put("accountType",c.getAccountType());m.put("status",c.getStatus());m.put("createdAt",formatTime(c.getCreatedAt()));m.put("cardNumber",safe(c.getCardNumber()));m.put("transferCode",safe(c.getTransferCode()));m.put("balance",c.getBalance());return m;}
-    private Map<String,Object> settingsMap(SiteSettings s){return Map.of("siteTitle",safe(s.getSiteTitle()),"announcement",safe(s.getAnnouncement()),"maintenance",s.isMaintenanceEnabled(),"maintenanceMessage",safe(s.getMaintenanceMessage()));}
+    private Map<String,Object> settingsMap(SiteSettings s){return Map.of("siteTitle",safe(s.getSiteTitle()),"announcement",safe(s.getAnnouncement()),"maintenance",s.isMaintenanceEnabled(),"maintenanceMessage",safe(s.getMaintenanceMessage()),"aiCreatorName",safe(s.getAiCreatorName()),"aiCustomKnowledge",safe(s.getAiCustomKnowledge()));}
 }
