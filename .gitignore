@@ -1,4 +1,8 @@
 target/
 src.zip
 *.log
+*.dump
 .env
+service-account*.json
+google-credentials*.json
+credentials*.json

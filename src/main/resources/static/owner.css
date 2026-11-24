@@ -1,0 +1,28 @@
+/* Scoped additions for the Owner Panel; the original website theme remains unchanged. */
+.owner-nav{color:#d6b36a!important;border-top:1px solid #ffffff16;margin-top:12px}
+.owner-panel{margin-top:42px;background:#fff;border:1px solid #e6e9e5;padding:25px}
+.owner-heading,.owner-section-head{display:flex;justify-content:space-between;align-items:center;gap:15px}
+.owner-heading h2{font:34px Georgia;margin:9px 0;color:#102333}.owner-heading h2 em{color:#b08e4e;font-weight:400}
+.owner-heading p,.owner-note{font-size:11px;line-height:1.7;color:#7b898e}
+.owner-secure{font-size:8px;letter-spacing:1.4px;color:#4b9875;white-space:nowrap}
+.owner-tabs{display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid #e7e9e5;margin:25px 0 22px;padding-bottom:12px}
+.owner-tab{background:#f7f8f5;border:1px solid #e5e8e3;padding:10px 12px;font-size:9px;color:#526168}
+.owner-tab.active{background:#0b2537;color:#d6b36a;border-color:#0b2537}
+.owner-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.owner-stats article,.owner-setting-card{border:1px solid #e7e9e5;background:#fbfcfa;padding:18px}
+.owner-stats small{display:block;font-size:8px;letter-spacing:1px;color:#87949a}.owner-stats strong{display:block;font:24px Georgia;color:#102c3e;margin-top:12px;overflow-wrap:anywhere}
+.owner-note{background:#f5f1e8;padding:12px 15px;margin-top:15px}
+.owner-section-head{margin:4px 0 17px}.owner-section-head h3{font:20px Georgia;margin:0;color:#102333}.owner-section-head span{font-size:9px;color:#89959a}
+.owner-form{display:grid;grid-template-columns:1.2fr 1fr 1fr .8fr auto;gap:8px;margin-bottom:18px}
+.owner-form input,.owner-form select,.owner-setting-card input,.owner-setting-card textarea,.owner-setting-card select{width:100%;border:1px solid #dce2de;background:#fff;padding:12px;font:11px Arial;color:#243943;min-width:0}
+.owner-form .gold-btn,.owner-setting-card .gold-btn{margin:0;padding:12px 15px;white-space:nowrap}
+.owner-section .table-wrap{max-height:460px;overflow:auto}.owner-section td{font-size:9px;padding:12px}.owner-section th{font-size:8px;padding:12px}
+.owner-action{border:1px solid #dfe5df;background:#fff;color:#385368;padding:6px 8px;font-size:8px;margin:2px}.owner-action.danger{color:#a54d43}
+.owner-status{display:inline-block;padding:5px 7px;background:#edf5ef;color:#45805e;font-size:8px}.owner-status.inactive,.owner-status.expired{background:#f5eeee;color:#a35d55}
+.owner-setting-card{display:flex;flex-direction:column;align-items:flex-start;gap:10px;max-width:700px}.owner-setting-card label{font-size:9px;letter-spacing:1px;color:#617078}.owner-setting-card p{font-size:10px;color:#78868c;line-height:1.7;margin:0 0 8px}.owner-setting-card textarea{resize:vertical}.owner-setting-card input,.owner-setting-card textarea{max-width:100%}.owner-toggle{display:flex;align-items:center;gap:10px;cursor:pointer}.owner-toggle input{width:18px;height:18px;accent-color:#b08e4e}.owner-toggle b{font-size:11px;color:#263b46}.backup-status{font:19px Georgia;color:#a45b42}.maintenance-screen{position:fixed;inset:0;background:#071827;z-index:15;display:grid;place-items:center;padding:25px}.maintenance-card{max-width:520px;text-align:center;color:white;padding:45px;background:#0d2639;border:1px solid #d6b36a66}.maintenance-card .brand-mark{margin:0 auto 25px}.maintenance-card h1{font:42px Georgia;margin:15px 0}.maintenance-card h1 em{color:#d6b36a;font-weight:400}.maintenance-card p{font-size:12px;line-height:1.8;color:#b7c1c5;margin:0 auto 25px;max-width:380px}
+@media(max-width:950px){.owner-form{grid-template-columns:1fr 1fr}.owner-form .gold-btn{grid-column:span 2}.owner-stats{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.owner-panel{padding:15px;margin-top:25px}.owner-heading{align-items:flex-start}.owner-heading h2{font-size:28px}.owner-tabs{gap:5px}.owner-tab{padding:9px 8px}.owner-form{grid-template-columns:1fr}.owner-form .gold-btn{grid-column:auto}.owner-stats{grid-template-columns:1fr 1fr}.owner-section-head{align-items:flex-start;flex-direction:column}.maintenance-card{padding:28px 20px}.maintenance-card h1{font-size:34px}}
+
+.announcement-bar{background:#f2eddf;color:#6b5937;text-align:center;padding:10px 6%;font-size:10px;letter-spacing:.4px;border-bottom:1px solid #e5dcc8}
+
+.backup-status.success{color:#45805e}.backup-status.failed{color:#a45b42}
