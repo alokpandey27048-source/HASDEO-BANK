@@ -1,0 +1,19 @@
+HASDEO BANK — CUSTOMER ACCESS CONTROL UPDATE
+
+Added to Owner Panel > Website Settings:
+- Allow customer signups: ON/OFF
+- Allow customer logins: ON/OFF
+
+Server-side behavior:
+- Signup OFF blocks all public POST /api/signup requests.
+- Customer login OFF blocks all POST /api/customer-login requests.
+- When customer login is OFF, existing customer sessions are denied access to protected APIs and /api/session reports unauthenticated.
+- Admin login and Owner Panel access remain available so the owner can restore customer access.
+- Owner settings are persisted in the site_settings database row and included in the public status response so the public buttons can be hidden when disabled.
+- Both controls default to ON for existing and new installations.
+
+This is a control for the fictional educational demo website, not a real banking service.
+
+Validation:
+- Node.js syntax check passed for src/main/resources/static/app.js.
+- Maven package could not be run in the build container because Maven is not installed. Run `mvn clean package` locally before pushing/deploying.

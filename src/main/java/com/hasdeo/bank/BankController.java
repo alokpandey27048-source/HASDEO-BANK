@@ -54,6 +54,11 @@ public class BankController {
     private void requireLogin(HttpSession session) {
         if (!Boolean.TRUE.equals(session.getAttribute("loggedIn")) && session.getAttribute("customerId") == null)
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Please log in first.");
+        if (session.getAttribute("customerId") != null && !customerLoginAllowed())
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Customer access is temporarily disabled by the website owner.");
+    }
+    private boolean customerLoginAllowed() {
+        return settingsRepository.findById(1L).map(SiteSettings::isCustomerLoginEnabled).orElse(true);
     }
     private void requireAdmin(HttpSession session) {
         if (!Boolean.TRUE.equals(session.getAttribute("loggedIn")) || session.getAttribute("customerId") != null)
@@ -81,6 +86,8 @@ public class BankController {
 
     @PostMapping("/signup") @Transactional
     public Map<String,Object> signup(@RequestBody Map<String,String> body,HttpSession session,HttpServletRequest request) {
+        SiteSettings accessSettings=settingsRepository.findById(1L).orElseGet(()->new SiteSettings(1L));
+        if(!accessSettings.isCustomerSignupEnabled()) throw new ResponseStatusException(HttpStatus.FORBIDDEN,"New customer signups are temporarily closed by the website owner.");
         String name=requiredText(body,"name",100), username=requiredText(body,"username",40).toLowerCase(Locale.ROOT);
         String email=optionalText(body.get("email"),120); if(!email.isBlank()&&!email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter a valid email address.");
         String password=body.getOrDefault("password","");
@@ -91,6 +98,7 @@ public class BankController {
         DemoCustomer c=new DemoCustomer("HBC"+UUID.randomUUID().toString().replace("-","").substring(0,10).toUpperCase(Locale.ROOT),name,"",email,"Savings");
         c.setUsername(username); c.setPasswordHash(hashPassword(password)); c.setTransferCode(code); c.setCardNumber(card); c.setBalance(BigDecimal.ZERO);
         c=customerRepository.save(c); request.changeSessionId(); session.removeAttribute("loggedIn"); session.removeAttribute("adminUsername"); session.setAttribute("customerId",c.getId()); session.setAttribute("customerUsername",username); session.setMaxInactiveInterval(30*60);
+        sessionRepository.save(new AdminSessionRecord(sessionHash(session),username,"CUSTOMER"));
         activityRepository.save(new ActivityLog(username,"CUSTOMER_SIGNUP","New demo customer account created"));
         mailService.notifyAdmin("New customer signup","Customer: "+name+"\nUsername: "+username+"\nTransfer code: "+code);
         return customerSessionMap(c);
@@ -98,10 +106,12 @@ public class BankController {
 
     @PostMapping("/customer-login") @Transactional
     public Map<String,Object> customerLogin(@RequestBody Map<String,String> body,HttpSession session,HttpServletRequest request) {
+        if(!customerLoginAllowed()) throw new ResponseStatusException(HttpStatus.FORBIDDEN,"Customer login is temporarily disabled by the website owner.");
         String username=body.getOrDefault("username","").trim().toLowerCase(Locale.ROOT), password=body.getOrDefault("password","");
         DemoCustomer c=customerRepository.findByUsername(username).orElseThrow(()->new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Incorrect username or password."));
         if(!"ACTIVE".equals(c.getStatus()) || !verifyPassword(password,c.getPasswordHash())) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Incorrect username or password.");
         request.changeSessionId(); session.removeAttribute("loggedIn"); session.removeAttribute("adminUsername"); session.setAttribute("customerId",c.getId()); session.setAttribute("customerUsername",username); session.setMaxInactiveInterval(30*60);
+        sessionRepository.save(new AdminSessionRecord(sessionHash(session),username,"CUSTOMER"));
         activityRepository.save(new ActivityLog(username,"CUSTOMER_LOGIN","Customer signed in")); return customerSessionMap(c);
     }
 
@@ -133,7 +143,8 @@ public class BankController {
             String username=actor(session); sessionRepository.findBySessionHash(sessionHash(session)).ifPresent(AdminSessionRecord::logout);
             activityRepository.save(new ActivityLog(username,"ADMIN_LOGOUT","Admin signed out"));
         } else if(session.getAttribute("customerId")!=null) {
-            activityRepository.save(new ActivityLog(actor(session),"CUSTOMER_LOGOUT","Customer signed out"));
+            String username=actor(session); sessionRepository.findBySessionHash(sessionHash(session)).ifPresent(AdminSessionRecord::logout);
+            activityRepository.save(new ActivityLog(username,"CUSTOMER_LOGOUT","Customer signed out"));
         }
         session.invalidate(); return Map.of("success",true);
     }
@@ -145,6 +156,7 @@ public class BankController {
             return Map.of("authenticated",true,"role","ADMIN");
         Object customerId = session.getAttribute("customerId");
         if (customerId != null) {
+            if (!customerLoginAllowed()) return Map.of("authenticated",false,"accessDisabled",true);
             DemoCustomer customer = currentCustomer(session);
             return Map.of("authenticated",true,"role","CUSTOMER","name",customer.getName());
         }
@@ -156,14 +168,14 @@ public class BankController {
     public Map<String,Object> sessionPing(HttpSession session) {
         requireLogin(session);
         sessionRepository.findBySessionHash(sessionHash(session)).ifPresent(AdminSessionRecord::seen);
-        return Map.of("success",true);
+        return Map.of("success",true,"serverTime",Instant.now().toString());
     }
 
     @GetMapping("/public/status")
     @Transactional(readOnly=true)
     public Map<String,Object> publicStatus() {
         SiteSettings s=settingsRepository.findById(1L).orElseGet(()->new SiteSettings(1L));
-        return Map.of("maintenance",s.isMaintenanceEnabled(),"message",safe(s.getMaintenanceMessage()),"siteTitle",safe(s.getSiteTitle()),"announcement",safe(s.getAnnouncement()));
+        return Map.of("maintenance",s.isMaintenanceEnabled(),"message",safe(s.getMaintenanceMessage()),"siteTitle",safe(s.getSiteTitle()),"announcement",safe(s.getAnnouncement()),"announcementUpdatedAt",s.getAnnouncementUpdatedAt()==null?"":s.getAnnouncementUpdatedAt().toString(),"customerSignupEnabled",s.isCustomerSignupEnabled(),"customerLoginEnabled",s.isCustomerLoginEnabled());
     }
 
     @GetMapping("/account") @Transactional(readOnly=true)
@@ -378,11 +390,37 @@ public class BankController {
     @GetMapping("/owner/sessions") @Transactional
     public List<Map<String,Object>> sessions(HttpSession session) {
         requireAdmin(session); expireStaleSessions();
+        List<AdminSessionRecord> recorded=sessionRepository.findTop100ByOrderByLoginAtDesc();
         List<Map<String,Object>> rows=new ArrayList<>();
-        sessionRepository.findTop100ByOrderByLoginAtDesc().forEach(s->{Map<String,Object> m=new LinkedHashMap<>();m.put("username",s.getUsername());m.put("status",s.getStatus());m.put("loginAt",formatTime(s.getLoginAt()));m.put("lastSeenAt",formatTime(s.getLastSeenAt()));m.put("logoutAt",s.getLogoutAt()==null?"—":formatTime(s.getLogoutAt()));rows.add(m);});
-        activityRepository.findTop100ByOrderByCreatedAtDesc().stream().filter(a->"CUSTOMER_LOGIN".equals(a.getAction()) || "CUSTOMER_SIGNUP".equals(a.getAction())).forEach(a->{Map<String,Object> m=new LinkedHashMap<>();m.put("username",a.getActor());m.put("status","CUSTOMER_SIGNUP".equals(a.getAction())?"SIGNED UP":"CUSTOMER LOGIN");m.put("loginAt",formatTime(a.getCreatedAt()));m.put("lastSeenAt",formatTime(a.getCreatedAt()));m.put("logoutAt","—");rows.add(m);});
-        rows.sort((a,b)->String.valueOf(b.get("loginAt")).compareTo(String.valueOf(a.get("loginAt"))));
+        for(AdminSessionRecord record:recorded) {
+            Map<String,Object> m=new LinkedHashMap<>();m.put("username",record.getUsername());m.put("role",record.getRole());m.put("status",record.getStatus());
+            m.put("loginAt",formatTime(record.getLoginAt()));m.put("lastSeenAt",formatTime(record.getLastSeenAt()));m.put("logoutAt",record.getLogoutAt()==null?"—":formatTime(record.getLogoutAt()));m.put("_sortAt",record.getLoginAt());rows.add(m);
+        }
+        // Preserve older customer login/signup events, but label them historical because no heartbeat/logout was captured then.
+        for(ActivityLog event:activityRepository.findTop100ByOrderByCreatedAtDesc()) {
+            if(!"CUSTOMER_LOGIN".equals(event.getAction()) && !"CUSTOMER_SIGNUP".equals(event.getAction())) continue;
+            boolean alreadyRecorded=recorded.stream().anyMatch(r->r.getUsername().equals(event.getActor()) && Math.abs(r.getLoginAt().toEpochMilli()-event.getCreatedAt().toEpochMilli())<=15000);
+            if(!alreadyRecorded) {Map<String,Object> m=new LinkedHashMap<>();m.put("username",event.getActor());m.put("role","CUSTOMER");m.put("status","HISTORIC");m.put("loginAt",formatTime(event.getCreatedAt()));m.put("lastSeenAt","Not recorded");m.put("logoutAt","Not recorded");m.put("_sortAt",event.getCreatedAt());rows.add(m);}
+        }
+        rows.sort((a,b)->((Instant)b.get("_sortAt")).compareTo((Instant)a.get("_sortAt")));
+        rows.forEach(m->m.remove("_sortAt"));
         return rows.stream().limit(100).toList();
+    }
+
+    @GetMapping("/owner/presence") @Transactional
+    public List<Map<String,Object>> livePresence(HttpSession session) {
+        requireAdmin(session); expireStaleSessions();
+        Map<String,AdminSessionRecord> latest=new HashMap<>();
+        for(AdminSessionRecord record:sessionRepository.findByRoleOrderByLastSeenAtDesc("CUSTOMER")) {
+            AdminSessionRecord prior=latest.get(record.getUsername());
+            if(prior==null || (record.getLastSeenAt()!=null && (prior.getLastSeenAt()==null || record.getLastSeenAt().isAfter(prior.getLastSeenAt())))) latest.put(record.getUsername(),record);
+        }
+        Instant cutoff=Instant.now().minusSeconds(75);
+        return customerRepository.findAll().stream().map(c->{
+            AdminSessionRecord r=latest.get(c.getUsername()); boolean online=r!=null && "ACTIVE".equals(r.getStatus()) && r.getLastSeenAt()!=null && r.getLastSeenAt().isAfter(cutoff);
+            Map<String,Object> m=new LinkedHashMap<>();m.put("name",c.getName());m.put("username",c.getUsername());m.put("status",online?"ONLINE":"OFFLINE");
+            m.put("lastSeenAt",r==null?"Never":formatTime(r.getLastSeenAt()));m.put("loginAt",r==null?"Never":formatTime(r.getLoginAt()));return m;
+        }).toList();
     }
 
     @GetMapping("/owner/settings") @Transactional(readOnly=true)
@@ -392,10 +430,33 @@ public class BankController {
     public Map<String,Object> updateSettings(@RequestBody Map<String,String> body,HttpSession session) {
         requireAdmin(session); SiteSettings s=getSettings();
         if(body.containsKey("siteTitle")) s.setSiteTitle(requiredText(body,"siteTitle",100));
-        if(body.containsKey("announcement")) s.setAnnouncement(optionalText(body.get("announcement"),240));
         if(body.containsKey("aiCreatorName")) s.setAiCreatorName(optionalText(body.get("aiCreatorName"),80));
         if(body.containsKey("aiCustomKnowledge")) s.setAiCustomKnowledge(optionalText(body.get("aiCustomKnowledge"),5000));
         log(session,"WEBSITE_SETTINGS_UPDATED","Updated website and AI assistant settings"); return settingsMap(s);
+    }
+
+    @PostMapping("/owner/access-control") @Transactional
+    public Map<String,Object> updateCustomerAccess(@RequestBody Map<String,Object> body,HttpSession session) {
+        requireAdmin(session); SiteSettings s=getSettings();
+        if(body.containsKey("customerSignupEnabled")) s.setCustomerSignupEnabled(parseBooleanSetting(body.get("customerSignupEnabled"),"customerSignupEnabled"));
+        if(body.containsKey("customerLoginEnabled")) s.setCustomerLoginEnabled(parseBooleanSetting(body.get("customerLoginEnabled"),"customerLoginEnabled"));
+        log(session,"CUSTOMER_ACCESS_SETTINGS_UPDATED","Customer signup="+s.isCustomerSignupEnabled()+", customer login="+s.isCustomerLoginEnabled());
+        return Map.of("customerSignupEnabled",s.isCustomerSignupEnabled(),"customerLoginEnabled",s.isCustomerLoginEnabled());
+    }
+
+    private boolean parseBooleanSetting(Object value,String field) {
+        if(value instanceof Boolean b) return b;
+        if(value instanceof String text && ("true".equalsIgnoreCase(text)||"false".equalsIgnoreCase(text))) return Boolean.parseBoolean(text);
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Invalid value for "+field+".");
+    }
+
+    @PostMapping("/owner/announcement/send") @Transactional
+    public Map<String,Object> sendAnnouncement(@RequestBody Map<String,Object> body,HttpSession session) {
+        requireAdmin(session); SiteSettings s=getSettings();
+        String message=requiredTextObject(body,"message",240);
+        s.setAnnouncement(message);
+        log(session,"ANNOUNCEMENT_SENT","Broadcast announcement sent to all customer sessions");
+        return Map.of("success",true,"message",safe(s.getAnnouncement()),"updatedAt",s.getAnnouncementUpdatedAt().toString());
     }
 
     @PostMapping("/owner/maintenance") @Transactional
@@ -444,12 +505,13 @@ public class BankController {
     }
 
     private void expireStaleSessions() {
-        Instant cutoff=Instant.now().minusSeconds(30*60);
+        Instant cutoff=Instant.now().minusSeconds(75);
         sessionRepository.findByStatusAndLastSeenAtBefore("ACTIVE",cutoff).forEach(AdminSessionRecord::expire);
     }
     private SiteSettings getSettings(){return settingsRepository.findById(1L).orElseGet(()->settingsRepository.save(new SiteSettings(1L)));}
     private AccountState lockedAccount(){return accountRepository.findByIdForUpdate(1L).orElseThrow(()->new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,"Demo account is not initialized."));}
     private BigDecimal getAmount(Map<String,Object> body){try{BigDecimal v=new BigDecimal(String.valueOf(body.get("amount"))).setScale(2,RoundingMode.UNNECESSARY);if(v.signum()<=0||v.compareTo(new BigDecimal("1000000000.00"))>0)throw new NumberFormatException();return v;}catch(Exception ex){throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter an amount from ₹0.01 up to ₹100 crore, with up to two decimal places.");}}
+    private String requiredTextObject(Map<String,Object> body,String key,int max){String v=String.valueOf(body.getOrDefault(key,"")).trim();if(v.isEmpty()||v.length()>max)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter a message up to "+max+" characters.");return v;}
     private String requiredText(Map<String,String> body,String key,int max){String v=body.getOrDefault(key,"").trim();if(v.isEmpty()||v.length()>max)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Enter a valid "+key+" (max "+max+" characters).");return v;}
     private String optionalText(String v,int max){String s=v==null?"":v.trim();if(s.length()>max)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"Text is too long (max "+max+" characters).");return s;}
     private String safe(String v){return v==null?"":v;}
@@ -457,5 +519,5 @@ public class BankController {
     private Map<String,Object> timeMap(Map<String,Object> base,Instant instant){Map<String,Object> m=new LinkedHashMap<>(base);m.put("timestamp",instant.atZone(INDIA_ZONE).toOffsetDateTime().toString());m.put("date",formatTime(instant));return m;}
     private Map<String,Object> toTransactionMap(BankTransaction t){Map<String,Object> m=new LinkedHashMap<>();m.put("id","HB"+t.getId());m.put("description",t.getDescription());m.put("amount",t.getAmount());m.put("type",t.getType());return timeMap(m,t.getCreatedAt());}
     private Map<String,Object> toCustomerMap(DemoCustomer c){Map<String,Object> m=new LinkedHashMap<>();m.put("id",c.getId());m.put("customerCode",c.getCustomerCode());m.put("name",c.getName());m.put("contact",safe(c.getContactLabel()));m.put("email",safe(c.getEmailLabel()));m.put("username",safe(c.getUsername()));m.put("accountType",c.getAccountType());m.put("status",c.getStatus());m.put("createdAt",formatTime(c.getCreatedAt()));m.put("cardNumber",safe(c.getCardNumber()));m.put("transferCode",safe(c.getTransferCode()));m.put("balance",c.getBalance());return m;}
-    private Map<String,Object> settingsMap(SiteSettings s){return Map.of("siteTitle",safe(s.getSiteTitle()),"announcement",safe(s.getAnnouncement()),"maintenance",s.isMaintenanceEnabled(),"maintenanceMessage",safe(s.getMaintenanceMessage()),"aiCreatorName",safe(s.getAiCreatorName()),"aiCustomKnowledge",safe(s.getAiCustomKnowledge()));}
+    private Map<String,Object> settingsMap(SiteSettings s){return Map.of("siteTitle",safe(s.getSiteTitle()),"announcement",safe(s.getAnnouncement()),"maintenance",s.isMaintenanceEnabled(),"maintenanceMessage",safe(s.getMaintenanceMessage()),"aiCreatorName",safe(s.getAiCreatorName()),"aiCustomKnowledge",safe(s.getAiCustomKnowledge()),"customerSignupEnabled",s.isCustomerSignupEnabled(),"customerLoginEnabled",s.isCustomerLoginEnabled());}
 }

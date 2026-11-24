@@ -1,6 +1,12 @@
 const $ = (id) => document.getElementById(id);
 let publicMaintenance = false;
+let publicCustomerSignupEnabled = true;
+let publicCustomerLoginEnabled = true;
 let sessionPingTimer = null;
+let presenceRefreshTimer = null;
+let publicStatusTimer = null;
+let isAdminSession = false;
+let lastAnnouncementStamp = null;
 let balanceRefreshTimer = null;
 let balanceRefreshBusy = false;
 let latestAccountData = null;
@@ -12,7 +18,7 @@ function openLogin(){openCustomerLogin();}
 function openCustomerLogin(){showAuthForm('customer');$('loginModal').classList.remove('hidden');}
 function openSignup(){showAuthForm('signup');$('loginModal').classList.remove('hidden');}
 function openAdminLogin(){showAuthForm('admin');$('loginModal').classList.remove('hidden');}
-function showAuthForm(mode){const forms={customer:'customerLoginForm',signup:'signupForm',admin:'loginForm'};Object.values(forms).forEach(id=>$(id).classList.add('hidden'));$(forms[mode]).classList.remove('hidden');$('loginError').textContent='';$('authTitle').innerHTML=mode==='signup'?'Create your <em>account.</em>':mode==='admin'?'Admin <em>sign in.</em>':'Customer <em>sign in.</em>';$('authDescription').textContent=mode==='signup'?'Create a free educational demo account.':mode==='admin'?'Separate secure access for the website administrator.':'Sign in to your educational demo account.';}
+function showAuthForm(mode){const forms={customer:'customerLoginForm',signup:'signupForm',admin:'loginForm'};if((mode==='signup'&&!publicCustomerSignupEnabled)||(mode==='customer'&&!publicCustomerLoginEnabled)){Object.values(forms).forEach(id=>$(id).classList.add('hidden'));$('loginModal').classList.remove('hidden');$('authTitle').innerHTML=mode==='signup'?'Signups are <em>paused.</em>':'Customer login is <em>paused.</em>';$('authDescription').textContent='This customer access option is temporarily disabled by the website owner.';$('loginError').textContent=mode==='signup'?'New customer signups are temporarily closed.':'Customer login is temporarily disabled.';return;}Object.values(forms).forEach(id=>$(id).classList.add('hidden'));$(forms[mode]).classList.remove('hidden');$('loginError').textContent='';$('authTitle').innerHTML=mode==='signup'?'Create your <em>account.</em>':mode==='admin'?'Admin <em>sign in.</em>':'Customer <em>sign in.</em>';$('authDescription').textContent=mode==='signup'?'Create a free educational demo account.':mode==='admin'?'Separate secure access for the website administrator.':'Sign in to your educational demo account.';}
 function closeLogin(){ $('loginModal').classList.add('hidden'); }
 function toast(message){ const el=$('toast'); el.textContent=message; el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),2800); }
 function escapeHtml(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -47,14 +53,27 @@ async function checkPublicStatus(){
   try{
     const status=await api('/public/status',null,'GET');
     publicMaintenance=Boolean(status.maintenance);
+    publicCustomerSignupEnabled=status.customerSignupEnabled!==false;
+    publicCustomerLoginEnabled=status.customerLoginEnabled!==false;
+    document.querySelector('.nav-signup')?.classList.toggle('hidden',!publicCustomerSignupEnabled);
+    document.querySelector('.nav-login')?.classList.toggle('hidden',!publicCustomerLoginEnabled);
+    $('customerLoginSwitch')?.classList.toggle('hidden',!publicCustomerLoginEnabled);
+    $('customerSignupSwitch')?.classList.toggle('hidden',!publicCustomerSignupEnabled);
     $('maintenanceMessage').textContent=status.message||'The website is temporarily unavailable.';
     if(status.siteTitle) document.title=status.siteTitle+' | Banking, made premium';
     $('announcementBar').textContent=status.announcement||'';
     $('announcementBar').classList.toggle('hidden',!status.announcement);
-    $('maintenanceScreen').classList.toggle('hidden',!publicMaintenance);
-    document.querySelector('.topbar').classList.toggle('hidden',publicMaintenance);
-    document.querySelector('main').classList.toggle('hidden',publicMaintenance);
-    document.querySelector('footer').classList.toggle('hidden',publicMaintenance);
+    const stamp=status.announcementUpdatedAt||'';
+    if(stamp){
+      const stored=localStorage.getItem('hasdeoAnnouncementSeenAt')||'';
+      if(stamp!==stored && status.announcement) toast('New announcement: '+status.announcement);
+      if(stamp!==stored) localStorage.setItem('hasdeoAnnouncementSeenAt',stamp);
+    }
+    const showMaintenance=publicMaintenance&&!isAdminSession;
+    $('maintenanceScreen').classList.toggle('hidden',!showMaintenance);
+    document.querySelector('.topbar').classList.toggle('hidden',showMaintenance);
+    document.querySelector('main').classList.toggle('hidden',showMaintenance);
+    document.querySelector('footer').classList.toggle('hidden',showMaintenance);
   }catch(error){console.warn('Could not load public website status:',error.message);}
 }
 
@@ -67,16 +86,17 @@ function renderDashboardServices(){
  [nav,grid].forEach(root=>root.querySelectorAll('[data-open-service]').forEach(btn=>btn.addEventListener('click',()=>openServiceWorkspace(btn.dataset.openService))));
 }
 async function enterDashboard(role){
-  closeLogin();$('maintenanceScreen').classList.add('hidden');document.querySelector('main').classList.add('hidden');document.querySelector('footer').classList.add('hidden');
+  const isAdmin=role==='ADMIN';isAdminSession=isAdmin;
+  closeLogin();$('maintenanceScreen').classList.toggle('hidden',!publicMaintenance||isAdmin);document.querySelector('main').classList.toggle('hidden',publicMaintenance&&!isAdmin);document.querySelector('footer').classList.toggle('hidden',publicMaintenance&&!isAdmin);document.querySelector('.topbar').classList.toggle('hidden',publicMaintenance&&!isAdmin);
   $('dashboard').classList.remove('hidden');$('ownerPanel').classList.add('hidden');
-  const isAdmin=role==='ADMIN';renderDashboardServices();document.querySelectorAll('.owner-nav').forEach(el=>el.classList.toggle('hidden',!isAdmin));
+  renderDashboardServices();document.querySelectorAll('.owner-nav').forEach(el=>el.classList.toggle('hidden',!isAdmin));
   $('customerAccountCard').classList.remove('hidden');
   $('dashboard').dataset.role=role;
   document.querySelector('.admin-pill').innerHTML='<span></span> '+(isAdmin?'Admin demo':'Customer demo');
   document.querySelector('.side .brand small').textContent=isAdmin?'ADMIN PORTAL':'CUSTOMER PORTAL';
   await loadAccount();if(isAdmin)await loadOwnerOverview();
   const savedLanguage=localStorage.getItem('hasdeoLanguage');if(savedLanguage&&$('languageSelect')){$('languageSelect').value=savedLanguage;$('languageSelect').dispatchEvent(new Event('change'));}
-  if(sessionPingTimer)clearInterval(sessionPingTimer);sessionPingTimer=setInterval(()=>api('/session/ping',{}).catch(()=>{}),60000);
+  if(sessionPingTimer)clearInterval(sessionPingTimer);api('/session/ping',{}).catch(()=>{});sessionPingTimer=setInterval(()=>api('/session/ping',{}).catch(()=>{}),30000);
   if(balanceRefreshTimer)clearInterval(balanceRefreshTimer);
   balanceRefreshTimer=setInterval(async()=>{
     if(balanceRefreshBusy || $('dashboard').classList.contains('hidden')) return;
@@ -182,6 +202,7 @@ async function loadOwnerPanel(){
   await loadOwnerTab(active);
 }
 async function loadOwnerTab(tab){
+  if(presenceRefreshTimer){clearInterval(presenceRefreshTimer);presenceRefreshTimer=null;}
   document.querySelectorAll('.owner-tab').forEach(b=>b.classList.toggle('active',b.dataset.ownerTab===tab));
   document.querySelectorAll('[data-owner-section]').forEach(s=>s.classList.toggle('hidden',s.dataset.ownerSection!==tab));
   try{
@@ -189,6 +210,7 @@ async function loadOwnerTab(tab){
     if(tab==='transactions') await loadOwnerTransactions();
     if(tab==='maintenance') await loadMaintenance();
     if(tab==='sessions') await loadSessions();
+    if(tab==='presence'){await loadLivePresence();presenceRefreshTimer=setInterval(()=>loadLivePresence().catch(()=>{}),15000);}
     if(tab==='activity') await loadActivity();
     if(tab==='settings') await loadSettings();
     if(tab==='backup') await loadBackupStatus();
@@ -259,22 +281,29 @@ async function loadOwnerTransactions(){
 }
 async function loadMaintenance(){
   const data=await api('/owner/settings',null,'GET');
-  $('maintenanceToggle').checked=Boolean(data.maintenance);$('maintenanceText').value=data.maintenanceMessage||'';
+  $('maintenanceToggle').checked=Boolean(data.maintenance);$('maintenanceText').value=data.maintenanceMessage||'';$('maintenanceState').textContent=data.maintenance?'MAINTENANCE ON · Customers blocked':'MAINTENANCE OFF · Website available';
 }
 $('saveMaintenance').addEventListener('click',async()=>{
-  try{await api('/owner/maintenance',{enabled:$('maintenanceToggle').checked,message:$('maintenanceText').value});await checkPublicStatus();toast('Maintenance settings saved.');}
+  try{const result=await api('/owner/maintenance',{enabled:$('maintenanceToggle').checked,message:$('maintenanceText').value});await checkPublicStatus();$('maintenanceState').textContent=result.maintenance?'MAINTENANCE ON · Customers blocked':'MAINTENANCE OFF · Website available';toast(result.maintenance?'Maintenance mode enabled. Customer access is blocked.':'Maintenance mode disabled. Website is available.');}
   catch(error){toast(error.message);}
 });
 async function loadSessions(){
   const rows=await api('/owner/sessions',null,'GET');
-  $('sessionRows').innerHTML=rows.map(s=>`<tr><td>${escapeHtml(s.username)}</td><td>${escapeHtml(s.loginAt)}</td><td>${escapeHtml(s.lastSeenAt)}</td><td>${escapeHtml(s.logoutAt)}</td><td><span class="owner-status ${s.status==='ACTIVE'?'':s.status.toLowerCase()}">${escapeHtml(s.status)}</span></td></tr>`).join('')||'<tr><td colspan="5">No login history.</td></tr>';
+  $('sessionRows').innerHTML=rows.map(s=>`<tr><td>${escapeHtml(s.username)}</td><td>${escapeHtml(s.role||'ADMIN')}</td><td>${escapeHtml(s.loginAt)}</td><td>${escapeHtml(s.lastSeenAt)}</td><td>${escapeHtml(s.logoutAt)}</td><td><span class="owner-status ${s.status==='ACTIVE'?'':s.status.toLowerCase()}">${escapeHtml(s.status)}</span></td></tr>`).join('')||'<tr><td colspan="6">No login history.</td></tr>';
+}
+async function loadLivePresence(){
+  const rows=await api('/owner/presence',null,'GET');
+  $('presenceRows').innerHTML=rows.map(c=>`<tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.username||'—')}</td><td><span class="owner-status ${c.status==='ONLINE'?'':'inactive'}">${escapeHtml(c.status)}</span></td><td>${escapeHtml(c.lastSeenAt)}</td><td>${escapeHtml(c.loginAt)}</td></tr>`).join('')||'<tr><td colspan="5">No customer accounts yet.</td></tr>';
+  $('presenceUpdatedAt').textContent='Last refreshed: '+new Date().toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata'});
 }
 async function loadActivity(){
   const rows=await api('/owner/activity',null,'GET');
   $('activityRows').innerHTML=rows.map(a=>`<tr><td>${escapeHtml(formatTransactionDate(a))}</td><td>${escapeHtml(a.actor)}</td><td>${escapeHtml(a.action)}</td><td>${escapeHtml(a.details)}</td></tr>`).join('')||'<tr><td colspan="4">No activity recorded.</td></tr>';
 }
 async function loadSettings(){
-  const data=await api('/owner/settings',null,'GET');$('siteTitle').value=data.siteTitle||'';$('siteAnnouncement').value=data.announcement||'';
+  const data=await api('/owner/settings',null,'GET');$('siteTitle').value=data.siteTitle||'';
+  $('customerSignupEnabled').checked=data.customerSignupEnabled!==false; $('customerLoginEnabled').checked=data.customerLoginEnabled!==false;
+  $('customerAccessFeedback').textContent='Current status: signups '+(data.customerSignupEnabled===false?'OFF':'ON')+' · customer logins '+(data.customerLoginEnabled===false?'OFF':'ON');
   await Promise.all([loadMailStatus(),loadServerTimeStatus()]);
 }
 async function loadMailStatus(){
@@ -294,7 +323,25 @@ $('testMailButton').addEventListener('click',async()=>{
   finally{button.disabled=false;button.textContent='Send test email';}
 });
 $('settingsForm').addEventListener('submit',async e=>{
-  e.preventDefault();try{await api('/owner/settings',{siteTitle:$('siteTitle').value,announcement:$('siteAnnouncement').value});await checkPublicStatus();toast('Website settings saved.');}catch(error){toast(error.message);}
+  e.preventDefault();try{await api('/owner/settings',{siteTitle:$('siteTitle').value});await checkPublicStatus();toast('Website settings saved.');}catch(error){toast(error.message);}
+});
+$('sendAnnouncement').addEventListener('click',async()=>{
+  const button=$('sendAnnouncement'),message=$('announcementMessage').value.trim();
+  if(!message){toast('Type an announcement first.');return;}
+  button.disabled=true;button.textContent='Sending…';
+  try{const result=await api('/owner/announcement/send',{message});$('announcementMessage').value='';await checkPublicStatus();$('announcementFeedback').textContent='Sent to all customer sessions · '+new Date(result.updatedAt).toLocaleString('en-IN',{timeZone:'Asia/Kolkata'});toast('Announcement sent to all customers.');}
+  catch(error){$('announcementFeedback').textContent=error.message;toast(error.message);}
+  finally{button.disabled=false;button.textContent='Send to all customers';}
+});
+$('saveCustomerAccess').addEventListener('click',async()=>{
+  const button=$('saveCustomerAccess');button.disabled=true;button.textContent='Saving…';
+  try{
+    const result=await api('/owner/access-control',{customerSignupEnabled:$('customerSignupEnabled').checked,customerLoginEnabled:$('customerLoginEnabled').checked});
+    await checkPublicStatus();
+    $('customerAccessFeedback').textContent='Saved · signups '+(result.customerSignupEnabled?'ON':'OFF')+' · customer logins '+(result.customerLoginEnabled?'ON':'OFF');
+    toast('Customer access settings saved.');
+  }catch(error){$('customerAccessFeedback').textContent=error.message;toast(error.message);}
+  finally{button.disabled=false;button.textContent='Save customer access settings';}
 });
 async function loadAiBrain(){
   const data=await api('/owner/settings',null,'GET');
@@ -344,6 +391,8 @@ async function pollBackupStatus(){
 }
 
 async function logout(){
+  isAdminSession=false;
+  if(presenceRefreshTimer){clearInterval(presenceRefreshTimer);presenceRefreshTimer=null;}
   if(sessionPingTimer){clearInterval(sessionPingTimer);sessionPingTimer=null;}
   if(balanceRefreshTimer){clearInterval(balanceRefreshTimer);balanceRefreshTimer=null;}
   try{await api('/logout',{});}catch(e){}
@@ -360,7 +409,7 @@ async function restoreSession(){
   }catch(error){console.warn('Could not restore the previous session:',error.message);}
 }
 window.addEventListener('keydown',e=>{if(e.key==='Escape')closeLogin();});
-(async()=>{await checkPublicStatus();await restoreSession();})();
+(async()=>{await checkPublicStatus();await restoreSession();await checkPublicStatus();publicStatusTimer=setInterval(checkPublicStatus,15000);})();
 
 // Individual service workspaces: each tile opens its own focused dashboard while the original site stays intact.
 const serviceDefinitions=[

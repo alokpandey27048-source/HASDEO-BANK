@@ -1,0 +1,25 @@
+HASDEO BANK — OWNER PANEL CONTROLS UPDATE
+Educational demo project only. Not a real banking or payment system.
+
+Included in this combined update:
+1. Maintenance mode is enforced server-side for all customer API routes. Visitors see the maintenance screen on the public site. Admin login, admin API access, and the Owner Panel remain available so the owner can switch maintenance OFF.
+2. Owner Panel > Website Settings > Customer announcement centre lets the owner type a message and send it to all visitors/customer sessions. Active pages poll the announcement status every 15 seconds and show an in-site toast; the latest message also remains in the announcement bar for customers who return later.
+3. Login History now records both customer and admin sessions in the session history table, including role, login time, heartbeat last-seen time, logout time, and ACTIVE / LOGGED_OUT / EXPIRED status. Signup-created sessions are recorded too.
+4. Owner Panel > Live Presence lists every registered demo customer as ONLINE or OFFLINE. ONLINE means a signed-in customer browser sent a server heartbeat within the last 75 seconds. The table refreshes every 15 seconds. This is session presence, not tracking of a person's physical device or activity outside the website.
+5. Existing customer signup/login access controls and existing dashboard features are retained.
+
+Important behavior:
+- Maintenance ON blocks customer API access, not just the visual page. The public HTML shell still loads so it can display the maintenance notice. Admin login remains possible.
+- Login presence is only available for signed-in customer accounts. Visitors who have not signed in are not individually identified.
+- When a browser closes without pressing Sign Out, the session is marked EXPIRED after the 75-second heartbeat window; last-seen time remains available. This is more accurate than claiming an immediate logout on tab close.
+- Announcement delivery is in-site polling/toast, not SMS, email, or guaranteed native push notifications. A customer who is offline sees the latest announcement when they return.
+
+Deployment:
+1. Extract this ZIP.
+2. Copy the extracted project files into the existing Git repository folder, excluding .git and target.
+3. Run: mvn clean package
+4. Only if the build succeeds, run git add ., git commit, and git push origin main.
+5. Wait for Render deployment to succeed, then test admin login, maintenance ON/OFF, customer login history, live presence, and announcement delivery in two separate browser sessions.
+
+Database note:
+Hibernate ddl-auto update adds the new role and announcement timestamp columns to the existing PostgreSQL tables. Keep the existing database configured; do not create a new database for this update.
