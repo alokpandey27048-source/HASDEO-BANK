@@ -1,0 +1,15 @@
+HASDEO BANK — REAL-TIME MAINTENANCE MODE FIX
+
+Changes:
+- Customer browsers check the public maintenance status every 2 seconds.
+- When maintenance is enabled, the maintenance screen immediately covers the customer workspace.
+- Existing customer dashboard/session remains mounted in the browser and is not logged out.
+- The backend permits the read-only session-status endpoint during maintenance so a page refresh can restore the existing customer session.
+- Customer APIs remain blocked by the backend maintenance filter while maintenance is ON.
+- When maintenance is disabled, the existing customer dashboard is revealed and account data is refreshed without asking the customer to sign in again.
+- Admin/owner access remains available during maintenance.
+- Updated asset version strings force browsers to load the corrected JavaScript and CSS.
+
+Verification:
+- JavaScript syntax checked with Node.js.
+- Maven package build could not be run in this environment because Maven is not installed.

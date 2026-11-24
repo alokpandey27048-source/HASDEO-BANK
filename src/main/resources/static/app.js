@@ -5,6 +5,7 @@ let publicCustomerLoginEnabled = true;
 let sessionPingTimer = null;
 let presenceRefreshTimer = null;
 let publicStatusTimer = null;
+let publicStatusBusy = false;
 let isAdminSession = false;
 let lastAnnouncementStamp = null;
 let balanceRefreshTimer = null;
@@ -53,24 +54,25 @@ function syncPageVisibility(){
   const dashboardOpen=!$('dashboard').classList.contains('hidden');
   // Keep the authenticated dashboard independent from the landing page's document flow.
   document.body.classList.toggle('dashboard-active',dashboardOpen);
-  const maintenanceVisible=publicMaintenance&&!isAdminSession&&!dashboardOpen;
-  $('maintenanceScreen').classList.toggle('hidden',!maintenanceVisible);
-  document.querySelector('.topbar').classList.toggle('hidden',dashboardOpen||maintenanceVisible);
-  document.querySelector('main').classList.toggle('hidden',dashboardOpen||maintenanceVisible);
-  document.querySelector('footer').classList.toggle('hidden',dashboardOpen||maintenanceVisible);
+  document.querySelector('.topbar').classList.toggle('hidden',dashboardOpen);
+  document.querySelector('main').classList.toggle('hidden',dashboardOpen);
+  document.querySelector('footer').classList.toggle('hidden',dashboardOpen);
 }
 
+async function retryMaintenanceStatus(){ await checkPublicStatus(); }
+
 async function checkPublicStatus(){
+  if(publicStatusBusy) return;
+  publicStatusBusy=true;
   try{
     const status=await api('/public/status',null,'GET');
-    publicMaintenance=Boolean(status.maintenance);
+    publicMaintenance=false;
     publicCustomerSignupEnabled=status.customerSignupEnabled!==false;
     publicCustomerLoginEnabled=status.customerLoginEnabled!==false;
     document.querySelector('.nav-signup')?.classList.toggle('hidden',!publicCustomerSignupEnabled);
     document.querySelector('.nav-login')?.classList.toggle('hidden',!publicCustomerLoginEnabled);
     $('customerLoginSwitch')?.classList.toggle('hidden',!publicCustomerLoginEnabled);
     $('customerSignupSwitch')?.classList.toggle('hidden',!publicCustomerSignupEnabled);
-    $('maintenanceMessage').textContent=status.message||'The website is temporarily unavailable.';
     if(status.siteTitle) document.title=status.siteTitle+' | Banking, made premium';
     $('announcementBar').textContent=status.announcement||'';
     $('announcementBar').classList.toggle('hidden',!status.announcement);
@@ -82,6 +84,7 @@ async function checkPublicStatus(){
     }
     syncPageVisibility();
   }catch(error){console.warn('Could not load public website status:',error.message);}
+  finally{publicStatusBusy=false;}
 }
 
 function renderDashboardServices(){
@@ -104,7 +107,8 @@ async function enterDashboard(role){
   $('dashboard').dataset.role=role;
   document.querySelector('.admin-pill').innerHTML='<span></span> '+(isAdmin?'Admin demo':'Customer demo');
   document.querySelector('.side .brand small').textContent=isAdmin?'ADMIN PORTAL':'CUSTOMER PORTAL';
-  await loadAccount();if(isAdmin)await loadOwnerOverview();
+  try{await loadAccount();}catch(error){if(!publicMaintenance)throw error;}
+  if(isAdmin)await loadOwnerOverview();
   const savedLanguage=localStorage.getItem('hasdeoLanguage');if(savedLanguage&&$('languageSelect')){$('languageSelect').value=savedLanguage;$('languageSelect').dispatchEvent(new Event('change'));}
   if(sessionPingTimer)clearInterval(sessionPingTimer);api('/session/ping',{}).catch(()=>{});sessionPingTimer=setInterval(()=>api('/session/ping',{}).catch(()=>{}),20000);
   if(balanceRefreshTimer)clearInterval(balanceRefreshTimer);
@@ -230,7 +234,6 @@ async function loadOwnerTab(tab){
   try{
     if(tab==='customers') await loadCustomers();
     if(tab==='transactions') await loadOwnerTransactions();
-    if(tab==='maintenance') await loadMaintenance();
     if(tab==='sessions') await loadSessions();
     if(tab==='presence'){await loadLivePresence();await loadPresenceHistory();presenceRefreshTimer=setInterval(()=>{loadLivePresence().catch(()=>{});loadPresenceHistory().catch(()=>{});},15000);}
     if(tab==='activity') await loadActivity();
@@ -301,14 +304,6 @@ async function loadOwnerTransactions(){
   const rows=await api('/owner/transactions',null,'GET');
   $('ownerTransactionRows').innerHTML=rows.map(t=>`<tr><td>${escapeHtml(t.id)}</td><td>${escapeHtml(t.description)}</td><td>${escapeHtml(formatTransactionDate(t))}</td><td>${escapeHtml(t.type)}</td><td class="right ${t.type==='CREDIT'?'credit':'debit'}">${t.type==='CREDIT'?'+':'−'} ${money(t.amount)}</td></tr>`).join('')||'<tr><td colspan="5">No transactions.</td></tr>';
 }
-async function loadMaintenance(){
-  const data=await api('/owner/settings',null,'GET');
-  $('maintenanceToggle').checked=Boolean(data.maintenance);$('maintenanceText').value=data.maintenanceMessage||'';$('maintenanceState').textContent=data.maintenance?'MAINTENANCE ON · Customers blocked':'MAINTENANCE OFF · Website available';
-}
-$('saveMaintenance').addEventListener('click',async()=>{
-  try{const result=await api('/owner/maintenance',{enabled:$('maintenanceToggle').checked,message:$('maintenanceText').value});await checkPublicStatus();$('maintenanceState').textContent=result.maintenance?'MAINTENANCE ON · Customers blocked':'MAINTENANCE OFF · Website available';toast(result.maintenance?'Maintenance mode enabled. Customer access is blocked.':'Maintenance mode disabled. Website is available.');}
-  catch(error){toast(error.message);}
-});
 async function loadSessions(){
   const rows=await api('/owner/sessions',null,'GET');
   $('sessionRows').innerHTML=rows.map(s=>`<tr><td>${escapeHtml(s.username)}</td><td>${escapeHtml(s.role||'ADMIN')}</td><td>${escapeHtml(s.loginAt)}</td><td>${escapeHtml(s.lastSeenAt)}</td><td>${escapeHtml(s.logoutAt)}</td><td><span class="owner-status ${s.status==='ACTIVE'?'':s.status.toLowerCase()}">${escapeHtml(s.status)}</span></td></tr>`).join('')||'<tr><td colspan="6">No login history.</td></tr>';
@@ -446,7 +441,7 @@ async function restoreSession(){
   }catch(error){console.warn('Could not restore the previous session:',error.message);}
 }
 window.addEventListener('keydown',e=>{if(e.key==='Escape')closeLogin();});
-(async()=>{await checkPublicStatus();await restoreSession();await checkPublicStatus();publicStatusTimer=setInterval(checkPublicStatus,15000);})();
+(async()=>{await checkPublicStatus();await restoreSession();await checkPublicStatus();publicStatusTimer=setInterval(checkPublicStatus,2000);})();
 
 // Individual service workspaces: each tile opens its own focused dashboard while the original site stays intact.
 const serviceDefinitions=[
