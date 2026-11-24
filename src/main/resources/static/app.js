@@ -58,10 +58,18 @@ async function checkPublicStatus(){
   }catch(error){console.warn('Could not load public website status:',error.message);}
 }
 
+function renderDashboardServices(){
+ const nav=$('dashboardServiceNav'),grid=$('dashboardServiceGrid');if(!nav||!grid)return;
+ const core=[{id:'overview',icon:'↗',title:'Account Overview'},{id:'deposit',icon:'＋',title:'Deposit Funds'},{id:'withdraw',icon:'−',title:'Withdraw Funds'},{id:'transfer',icon:'⇄',title:'Transfer Demo Funds'}];
+ const all=[...core,...serviceDefinitions];
+ nav.innerHTML=all.map(x=>`<button type="button" class="side-link" data-open-service="${x.id}">${x.icon} &nbsp; ${escapeHtml(x.title)}</button>`).join('');
+ grid.innerHTML=all.map(x=>`<button type="button" class="dashboard-service-card" data-open-service="${x.id}"><span class="service-icon">${x.icon}</span><strong>${escapeHtml(x.title)}</strong><small>${escapeHtml(x.desc||'Open your dedicated service dashboard')}</small></button>`).join('');
+ [nav,grid].forEach(root=>root.querySelectorAll('[data-open-service]').forEach(btn=>btn.addEventListener('click',()=>openServiceWorkspace(btn.dataset.openService))));
+}
 async function enterDashboard(role){
   closeLogin();$('maintenanceScreen').classList.add('hidden');document.querySelector('main').classList.add('hidden');document.querySelector('footer').classList.add('hidden');
   $('dashboard').classList.remove('hidden');$('ownerPanel').classList.add('hidden');
-  const isAdmin=role==='ADMIN';document.querySelectorAll('.owner-nav').forEach(el=>el.classList.toggle('hidden',!isAdmin));
+  const isAdmin=role==='ADMIN';renderDashboardServices();document.querySelectorAll('.owner-nav').forEach(el=>el.classList.toggle('hidden',!isAdmin));
   $('customerAccountCard').classList.remove('hidden');
   $('dashboard').dataset.role=role;
   document.querySelector('.admin-pill').innerHTML='<span></span> '+(isAdmin?'Admin demo':'Customer demo');
@@ -219,7 +227,10 @@ async function loadSupportTickets(){
 }
 $('supportForm').addEventListener('submit',async e=>{e.preventDefault();try{const result=await api('/support',{name:$('supportName').value.trim(),email:$('supportEmail').value.trim(),category:$('supportCategory').value,message:$('supportMessage').value.trim()});$('supportForm').reset();$('supportFeedback').textContent='Request received. Ticket #'+result.ticketId+'. '+(result.emailSent?'Email sent to the site owner.':'Ticket saved; owner email is not configured or could not be sent.');toast('Support request submitted.');}catch(error){$('supportFeedback').textContent=error.message;}});
 
-const supportAiHistory=[];
+const supportAiHistory=[];let pendingAiMessage='';let aiConversationLanguage='en';let aiLanguageAsked=false;
+function detectCustomerLanguage(text){if(/[\u0A00-\u0A7F]/.test(text))return 'Punjabi';if(/[\u0900-\u097F]/.test(text))return 'Hindi';if(/\b(kya|kaise|hai|ho|mujhe|mera|aap|kr|kar|bta|batao|kyu|nahi|haan)\b/i.test(text))return 'Hinglish';return 'English';}
+function isAffirmative(text){return /^(yes|yeah|y|haan|ha|ji|sure|okay|ok|bilkul|ਹਾਂ)(\s|[.!]*)$/i.test(text.trim());}
+function isNegative(text){return /^(no|nope|nahi|nah|na|ਨਹੀਂ)(\s|[.!]*)$/i.test(text.trim());}
 function addAiMessage(role,text){
   const line=document.createElement('div');line.className='support-ai-message '+(role==='user'?'user':'assistant');
   const label=document.createElement('b');label.textContent=role==='user'?'You':'HASDEO Help AI';
@@ -228,13 +239,16 @@ function addAiMessage(role,text){
 }
 $('supportAiForm').addEventListener('submit',async e=>{
   e.preventDefault();const input=$('supportAiQuestion');const message=input.value.trim();if(!message)return;
+  if(pendingAiMessage){if(isAffirmative(message)){aiConversationLanguage=detectCustomerLanguage(pendingAiMessage);const original=pendingAiMessage;pendingAiMessage='';input.value='';addAiMessage('user',message);supportAiHistory.push({role:'user',content:'Please continue in '+aiConversationLanguage+'.'});input.value=original;input.form.requestSubmit();return;}if(isNegative(message)){pendingAiMessage='';aiConversationLanguage='en';aiLanguageAsked=true;addAiMessage('user',message);addAiMessage('assistant','Of course. I will continue in English. Please send your question again.');input.value='';return;}addAiMessage('assistant','Please reply Yes to continue in your language, or No to continue in English.');input.value='';return;}
+  if(!aiLanguageAsked){const detected=detectCustomerLanguage(message);if(detected!=='English'){pendingAiMessage=message;aiLanguageAsked=true;addAiMessage('user',message);addAiMessage('assistant',`I noticed you're using ${detected}. Would you like me to continue our conversation in ${detected}? Please reply Yes or No.`);input.value='';return;}aiLanguageAsked=true;}
   const history=supportAiHistory.slice(-8);addAiMessage('user',message);supportAiHistory.push({role:'user',content:message});input.value='';
   const button=$('supportAiSend');button.disabled=true;button.textContent='Thinking…';
   try{
-    const result=await api('/support/ai',{message,history,name:$('supportAiName').value.trim(),email:$('supportAiEmail').value.trim()});
+    const aiMessage=aiConversationLanguage==='en'?message:`[Customer selected ${aiConversationLanguage}. Reply in ${aiConversationLanguage}.]\n${message}`;
+    const result=await api('/support/ai',{message:aiMessage,history,name:$('supportAiName').value.trim(),email:$('supportAiEmail').value.trim()});
     addAiMessage('assistant',result.answer);supportAiHistory.push({role:'assistant',content:result.answer});
     if(result.escalated&&!result.emailSent) addAiMessage('assistant','Your ticket is saved in the admin Support panel. Owner email notifications need Gmail SMTP configuration.');
-  }catch(error){addAiMessage('assistant',error.message+' Please use the Contact Support form below.');}
+  }catch(error){console.error('HASDEO Help AI request failed:',error);addAiMessage('assistant','I’m temporarily unable to connect to the AI service. Please try again shortly, or use the Contact Support form below so the website team can help.');}
   finally{button.disabled=false;button.textContent='Send';input.focus();}
 });
 
@@ -397,8 +411,10 @@ function openServiceWorkspace(id){
   body=`<div class="workspace-grid"><div class="workspace-stat"><small>WEBSITE</small><strong><span class="workspace-badge">OPEN</span></strong></div><div class="workspace-stat"><small>ACCOUNT DATA</small><strong>${latestAccountData?'Loaded':'Sign-in required'}</strong></div><div class="workspace-stat"><small>AI SUPPORT</small><strong>API dependent</strong></div></div>${workspacePanel('Service information','<p>The public website is responding if you can see this page. Account and AI services may require sign-in or server configuration. This panel does not perform external uptime monitoring.</p><button class="gold-btn" id="refreshServiceStatus">Refresh page status</button>')}`;
  }else if(id==='knowledge'){
   body=workspacePanel('HASDEO Help AI','<p>Ask the website assistant about demo features, account steps, transfers and common errors. If it is not configured, the Contact Support form remains available.</p><div class="workspace-actions"><button class="gold-btn" id="openAiSupport">Open AI Support</button><button class="gold-btn" id="openAiKnowledge">Owner AI Knowledge Settings</button></div>');
- }else if(['overview','deposit','withdraw','transfer'].includes(id)){
-  body=workspacePanel('Account access required','<p>Sign in to use account overview and demo transaction tools.</p><button class="gold-btn" id="workspaceSignIn">Sign in to demo account</button>');
+ }else if(id==='overview'){
+  body=`<div class="workspace-grid"><div class="workspace-stat"><small>AVAILABLE DEMO BALANCE</small><strong>${money(s.balance)}</strong></div><div class="workspace-stat"><small>ACCOUNT HOLDER</small><strong>${escapeHtml(latestAccountData?.name||'—')}</strong></div><div class="workspace-stat"><small>ACCOUNT STATUS</small><strong>${escapeHtml(latestAccountData?.status||'—')}</strong></div></div>${workspacePanel('Account overview','<p>Your demo account summary is shown above. Use the dashboard transaction history for recent activity.</p>')}`;
+ }else if(['deposit','withdraw','transfer'].includes(id)){
+  const target=id==='deposit'?'depositForm':id==='withdraw'?'withdrawForm':'transferForm';body=workspacePanel(item.title,`<p>Use the corresponding demo form in your dashboard.</p><button class="gold-btn" id="workspaceGoAction">Open ${item.title}</button>`);
  }
  $('serviceWorkspaceBody').innerHTML=body;box.classList.remove('hidden');document.body.style.overflow='hidden';
  const close=()=>{box.classList.add('hidden');document.body.style.overflow='';};$('closeServiceWorkspace').onclick=close;
@@ -410,7 +426,7 @@ function openServiceWorkspace(id){
  const refresh=$('refreshServiceStatus');if(refresh)refresh.onclick=()=>toast('Website interface is responding.');
  const ai=$('openAiSupport');if(ai)ai.onclick=()=>{close();document.querySelector('#support').scrollIntoView({behavior:'smooth'});};
  const aiOwner=$('openAiKnowledge');if(aiOwner)aiOwner.onclick=()=>{close();if($('dashboard').classList.contains('hidden')){openAdminLogin();toast('Admin sign-in is required.');}else if($('dashboard').dataset.role==='ADMIN'){showOwnerPanel().then(()=>loadOwnerTab('ai'));}else toast('Admin access is required.');};
- const sign=$('workspaceSignIn');if(sign)sign.onclick=()=>{close();openCustomerLogin();};
+ const sign=$('workspaceSignIn');if(sign)sign.onclick=()=>{close();openCustomerLogin();};const goAction=$('workspaceGoAction');if(goAction)goAction.onclick=()=>{close();const target=id==='deposit'?'depositAmount':id==='withdraw'?'withdrawAmount':'transferRecipient';$(target)?.scrollIntoView({behavior:'smooth',block:'center'});$(target)?.focus();};
 }
 function downloadDemoStatement(){const data=[['ID','Description','Date & Time (IST)','Type','Amount'],...latestTransactions.map(t=>[t.id,t.description,formatTransactionDate(t),t.type,t.amount])];const csv=data.map(r=>r.map(v=>'"'+String(v??'').replace(/"/g,'""')+'"').join(',')).join('\r\n');const url=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='HASDEO-BANK-demo-statement.csv';a.click();URL.revokeObjectURL(url);toast('Demo statement downloaded.');}
 $('closeServiceWorkspace').addEventListener('click',()=>{$('serviceWorkspace').classList.add('hidden');document.body.style.overflow='';});

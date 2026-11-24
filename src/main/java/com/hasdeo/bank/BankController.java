@@ -314,6 +314,7 @@ public class BankController {
             boolean emailSent=mailService.notifyAdmin("AI support needs human help #"+ticket.getId(),"Name: "+(name.isBlank()?"Not provided":name)+"\nEmail: "+(email.isBlank()?"Not provided":email)+"\nConversation:\n"+transcript);
             return Map.of("success",true,"answer",reply.answer()+"\n\nI've forwarded this to the website support team. Reference ticket #"+ticket.getId()+".","escalated",true,"ticketId",ticket.getId(),"emailSent",emailSent);
         } catch(Exception ex) {
+            System.getLogger(BankController.class.getName()).log(System.Logger.Level.ERROR, "HASDEO Help AI endpoint failed: " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
             String answer = !supportAiService.isConfigured()
                     ? "AI abhi configure nahi hai. Website owner ko server par OPENAI_API_KEY set karna hoga. Tab tak Contact Support form use kar sakte ho. / The AI service is not configured yet; please use Contact Support for now."
                     : "I couldn't reach the AI service just now. Please try again in a moment. If this keeps happening, you can choose Contact Support below. / AI service abhi respond nahi kar rahi; thodi der baad try karo.";
