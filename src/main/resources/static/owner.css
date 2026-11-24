@@ -55,3 +55,33 @@
 @media(prefers-reduced-motion:reduce){.dashboard-service-card{transition:none}.dashboard-service-card:hover{transform:none}}
 
 .announcement-composer{margin-top:16px;max-width:760px}.announcement-composer h3{font:20px Georgia;color:#102333;margin:0}.announcement-composer textarea{width:100%;line-height:1.55}.announcement-composer #announcementFeedback{font-size:10px}
+
+
+/* Fullscreen authenticated dashboard: detach it from the landing page flow. */
+body.dashboard-active { overflow: hidden !important; min-height: 100vh; }
+body.dashboard-active > .topbar,
+body.dashboard-active > main,
+body.dashboard-active > footer { display: none !important; }
+body.dashboard-active > #dashboard {
+  display: flex !important;
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 40 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  min-height: 100vh !important;
+  margin: 0 !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  isolation: isolate;
+}
+body.dashboard-active > #dashboard.hidden { display: none !important; }
+body.dashboard-active > #dashboard > .side { min-height: 100%; }
+body.dashboard-active > #dashboard > .dash-main { min-width: 0; }
+@media(max-width:650px) {
+  body.dashboard-active > #dashboard { display: block !important; }
+  body.dashboard-active > #dashboard > .side { min-height: auto; }
+  body.dashboard-active > #dashboard > .dash-main { width: 100%; }
+}

@@ -12,14 +12,17 @@ public class AdminSessionRecord {
     @Column(name="session_role",nullable=false,length=12,columnDefinition="varchar(12) default 'ADMIN'") private String role;
     @Column(name="login_at", nullable=false) private Instant loginAt;
     @Column(name="last_seen_at", nullable=false) private Instant lastSeenAt;
+    @Column(name="last_presence_log_at") private Instant lastPresenceLogAt;
     @Column(name="logout_at") private Instant logoutAt;
     @Column(nullable=false, length=16) private String status;
     protected AdminSessionRecord() {}
     public AdminSessionRecord(String hash,String username){this(hash,username,"ADMIN");}
-    public AdminSessionRecord(String hash,String username,String role){this.sessionHash=hash;this.username=username;this.role=role;this.loginAt=Instant.now();this.lastSeenAt=this.loginAt;this.status="ACTIVE";}
+    public AdminSessionRecord(String hash,String username,String role){this.sessionHash=hash;this.username=username;this.role=role;this.loginAt=Instant.now();this.lastSeenAt=this.loginAt;this.lastPresenceLogAt=this.loginAt;this.status="ACTIVE";}
     public Long getId(){return id;} public String getSessionHash(){return sessionHash;} public String getUsername(){return username;}
     public Instant getLoginAt(){return loginAt;} public Instant getLastSeenAt(){return lastSeenAt;} public Instant getLogoutAt(){return logoutAt;} public String getStatus(){return status;} public String getRole(){return role;}
     public void seen(){lastSeenAt=Instant.now();status="ACTIVE";logoutAt=null;}
+    public boolean shouldLogHeartbeat(){return lastPresenceLogAt==null || lastPresenceLogAt.isBefore(Instant.now().minusSeconds(55));}
+    public void markPresenceLogged(){lastPresenceLogAt=Instant.now();}
     public void logout(){logoutAt=Instant.now();status="LOGGED_OUT";}
     public void expire(){status="EXPIRED";}
 }

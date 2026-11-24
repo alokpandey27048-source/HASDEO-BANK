@@ -34,3 +34,9 @@ Latest additions in this final package:
 - AI continues to answer normal questions independently, using admin guidance when relevant.
 - AI website facts updated for the ₹100 crore transaction cap and paise support.
 - AI Brain settings require OPENAI_API_KEY for live model responses.
+
+v5 verification notes:
+- Fullscreen dashboard CSS/JS cache versions bumped so browsers fetch the updated layout files.
+- Live Presence now treats a customer as ONLINE when any of their sessions has a fresh heartbeat.
+- Added persistent presence timeline events for session start, periodic heartbeat, explicit sign-out, and timeout expiration.
+- Historical presence events begin from this deployment; older presence transitions cannot be reconstructed retroactively.

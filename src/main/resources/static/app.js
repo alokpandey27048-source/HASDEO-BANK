@@ -49,6 +49,17 @@ function formatTransactionDate(transaction){
   return transaction.date||'—';
 }
 
+function syncPageVisibility(){
+  const dashboardOpen=!$('dashboard').classList.contains('hidden');
+  // Keep the authenticated dashboard independent from the landing page's document flow.
+  document.body.classList.toggle('dashboard-active',dashboardOpen);
+  const maintenanceVisible=publicMaintenance&&!isAdminSession&&!dashboardOpen;
+  $('maintenanceScreen').classList.toggle('hidden',!maintenanceVisible);
+  document.querySelector('.topbar').classList.toggle('hidden',dashboardOpen||maintenanceVisible);
+  document.querySelector('main').classList.toggle('hidden',dashboardOpen||maintenanceVisible);
+  document.querySelector('footer').classList.toggle('hidden',dashboardOpen||maintenanceVisible);
+}
+
 async function checkPublicStatus(){
   try{
     const status=await api('/public/status',null,'GET');
@@ -69,11 +80,7 @@ async function checkPublicStatus(){
       if(stamp!==stored && status.announcement) toast('New announcement: '+status.announcement);
       if(stamp!==stored) localStorage.setItem('hasdeoAnnouncementSeenAt',stamp);
     }
-    const showMaintenance=publicMaintenance&&!isAdminSession;
-    $('maintenanceScreen').classList.toggle('hidden',!showMaintenance);
-    document.querySelector('.topbar').classList.toggle('hidden',showMaintenance);
-    document.querySelector('main').classList.toggle('hidden',showMaintenance);
-    document.querySelector('footer').classList.toggle('hidden',showMaintenance);
+    syncPageVisibility();
   }catch(error){console.warn('Could not load public website status:',error.message);}
 }
 
@@ -87,8 +94,11 @@ function renderDashboardServices(){
 }
 async function enterDashboard(role){
   const isAdmin=role==='ADMIN';isAdminSession=isAdmin;
-  closeLogin();$('maintenanceScreen').classList.toggle('hidden',!publicMaintenance||isAdmin);document.querySelector('main').classList.toggle('hidden',publicMaintenance&&!isAdmin);document.querySelector('footer').classList.toggle('hidden',publicMaintenance&&!isAdmin);document.querySelector('.topbar').classList.toggle('hidden',publicMaintenance&&!isAdmin);
+  closeLogin();
   $('dashboard').classList.remove('hidden');$('ownerPanel').classList.add('hidden');
+  window.scrollTo({top:0,left:0,behavior:'instant'});
+  $('dashboard').scrollTop=0;
+  syncPageVisibility();
   renderDashboardServices();document.querySelectorAll('.owner-nav').forEach(el=>el.classList.toggle('hidden',!isAdmin));
   $('customerAccountCard').classList.remove('hidden');
   $('dashboard').dataset.role=role;
@@ -96,7 +106,7 @@ async function enterDashboard(role){
   document.querySelector('.side .brand small').textContent=isAdmin?'ADMIN PORTAL':'CUSTOMER PORTAL';
   await loadAccount();if(isAdmin)await loadOwnerOverview();
   const savedLanguage=localStorage.getItem('hasdeoLanguage');if(savedLanguage&&$('languageSelect')){$('languageSelect').value=savedLanguage;$('languageSelect').dispatchEvent(new Event('change'));}
-  if(sessionPingTimer)clearInterval(sessionPingTimer);api('/session/ping',{}).catch(()=>{});sessionPingTimer=setInterval(()=>api('/session/ping',{}).catch(()=>{}),30000);
+  if(sessionPingTimer)clearInterval(sessionPingTimer);api('/session/ping',{}).catch(()=>{});sessionPingTimer=setInterval(()=>api('/session/ping',{}).catch(()=>{}),20000);
   if(balanceRefreshTimer)clearInterval(balanceRefreshTimer);
   balanceRefreshTimer=setInterval(async()=>{
     if(balanceRefreshBusy || $('dashboard').classList.contains('hidden')) return;
@@ -105,7 +115,10 @@ async function enterDashboard(role){
     catch(error) { console.warn('Automatic account refresh skipped:',error.message); }
     finally { balanceRefreshBusy=false; }
   },4000);
-  window.scrollTo(0,0);toast(isAdmin?'Welcome to the admin dashboard.':'Welcome to your demo account.');
+  // Re-assert the dashboard's own scroll position after async account/owner data loads.
+  window.scrollTo({top:0,left:0,behavior:'instant'});
+  $('dashboard').scrollTop=0;
+  toast(isAdmin?'Welcome to the admin dashboard.':'Welcome to your demo account.');
 }
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/login',{username:$('username').value.trim(),password:$('password').value});await enterDashboard('ADMIN');}catch(err){$('loginError').textContent=err.message;}});
 $('customerLoginForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/customer-login',{username:$('customerLoginUsername').value.trim(),password:$('customerLoginPassword').value});await enterDashboard('CUSTOMER');}catch(err){$('loginError').textContent=err.message;}});
@@ -210,7 +223,7 @@ async function loadOwnerTab(tab){
     if(tab==='transactions') await loadOwnerTransactions();
     if(tab==='maintenance') await loadMaintenance();
     if(tab==='sessions') await loadSessions();
-    if(tab==='presence'){await loadLivePresence();presenceRefreshTimer=setInterval(()=>loadLivePresence().catch(()=>{}),15000);}
+    if(tab==='presence'){await loadLivePresence();await loadPresenceHistory();presenceRefreshTimer=setInterval(()=>{loadLivePresence().catch(()=>{});loadPresenceHistory().catch(()=>{});},15000);}
     if(tab==='activity') await loadActivity();
     if(tab==='settings') await loadSettings();
     if(tab==='backup') await loadBackupStatus();
@@ -294,7 +307,11 @@ async function loadSessions(){
 async function loadLivePresence(){
   const rows=await api('/owner/presence',null,'GET');
   $('presenceRows').innerHTML=rows.map(c=>`<tr><td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.username||'—')}</td><td><span class="owner-status ${c.status==='ONLINE'?'':'inactive'}">${escapeHtml(c.status)}</span></td><td>${escapeHtml(c.lastSeenAt)}</td><td>${escapeHtml(c.loginAt)}</td></tr>`).join('')||'<tr><td colspan="5">No customer accounts yet.</td></tr>';
-  $('presenceUpdatedAt').textContent='Last refreshed: '+new Date().toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata'});
+  $('presenceUpdatedAt').textContent='Live refresh: '+new Date().toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata'});
+}
+async function loadPresenceHistory(){
+  const rows=await api('/owner/presence/history',null,'GET');
+  $('presenceHistoryRows').innerHTML=rows.map(e=>`<tr><td>${escapeHtml(e.timestamp)}</td><td>${escapeHtml(e.username)}</td><td>${escapeHtml(e.event)}</td><td>${escapeHtml(e.details)}</td></tr>`).join('')||'<tr><td colspan="4">No presence events recorded yet.</td></tr>';
 }
 async function loadActivity(){
   const rows=await api('/owner/activity',null,'GET');
@@ -398,8 +415,8 @@ async function logout(){
   try{await api('/logout',{});}catch(e){}
   $('dashboard').classList.add('hidden');$('ownerPanel').classList.add('hidden');$('dashboard').dataset.role='';$('transferForm').closest('.action-card').classList.remove('hidden');document.querySelectorAll('.owner-nav').forEach(el=>el.classList.remove('hidden'));
   document.querySelectorAll('.dash-main > :not(#ownerPanel)').forEach(el=>el.classList.remove('hidden'));
+  syncPageVisibility();
   await checkPublicStatus();
-  if(!publicMaintenance){document.querySelector('main').classList.remove('hidden');document.querySelector('footer').classList.remove('hidden');}
   toast('You have signed out.');
 }
 async function restoreSession(){

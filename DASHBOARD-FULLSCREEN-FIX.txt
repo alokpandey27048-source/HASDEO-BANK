@@ -1,0 +1,9 @@
+HASDEO BANK — DASHBOARD FULLSCREEN FIX
+
+This update makes the authenticated dashboard a fixed, viewport-sized application surface instead of relying on normal document flow below the landing page. It also locks background page scrolling while signed in, gives the dashboard its own vertical scroll area, and re-applies the top scroll position after account data finishes loading.
+
+The update preserves the existing navy-and-gold design and keeps the owner controls, maintenance, customer access, announcements, and session-history source files in this combined package.
+
+Validation performed in the preparation environment: JavaScript syntax check, HTML/XML structural checks, and ZIP integrity check. A full Maven build and live Render deployment were not run here.
+
+Educational demo only; this is not a real banking or payment system.

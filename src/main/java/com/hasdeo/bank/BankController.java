@@ -99,6 +99,7 @@ public class BankController {
         c.setUsername(username); c.setPasswordHash(hashPassword(password)); c.setTransferCode(code); c.setCardNumber(card); c.setBalance(BigDecimal.ZERO);
         c=customerRepository.save(c); request.changeSessionId(); session.removeAttribute("loggedIn"); session.removeAttribute("adminUsername"); session.setAttribute("customerId",c.getId()); session.setAttribute("customerUsername",username); session.setMaxInactiveInterval(30*60);
         sessionRepository.save(new AdminSessionRecord(sessionHash(session),username,"CUSTOMER"));
+        activityRepository.save(new ActivityLog(username,"PRESENCE_ONLINE","Customer session started through signup"));
         activityRepository.save(new ActivityLog(username,"CUSTOMER_SIGNUP","New demo customer account created"));
         mailService.notifyAdmin("New customer signup","Customer: "+name+"\nUsername: "+username+"\nTransfer code: "+code);
         return customerSessionMap(c);
@@ -112,6 +113,7 @@ public class BankController {
         if(!"ACTIVE".equals(c.getStatus()) || !verifyPassword(password,c.getPasswordHash())) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,"Incorrect username or password.");
         request.changeSessionId(); session.removeAttribute("loggedIn"); session.removeAttribute("adminUsername"); session.setAttribute("customerId",c.getId()); session.setAttribute("customerUsername",username); session.setMaxInactiveInterval(30*60);
         sessionRepository.save(new AdminSessionRecord(sessionHash(session),username,"CUSTOMER"));
+        activityRepository.save(new ActivityLog(username,"PRESENCE_ONLINE","Customer session started"));
         activityRepository.save(new ActivityLog(username,"CUSTOMER_LOGIN","Customer signed in")); return customerSessionMap(c);
     }
 
@@ -131,6 +133,7 @@ public class BankController {
         session.removeAttribute("customerId"); session.removeAttribute("customerUsername");
         session.setAttribute("loggedIn",true); session.setAttribute("adminUsername",username); session.setMaxInactiveInterval(30*60);
         sessionRepository.save(new AdminSessionRecord(sessionHash(session),username));
+        activityRepository.save(new ActivityLog(username,"PRESENCE_ONLINE","Admin session started"));
         activityRepository.save(new ActivityLog(username,"ADMIN_LOGIN","Admin signed in"));
         mailService.notifyAdmin("Admin login","Admin account "+username+" signed in.");
         return Map.of("success",true,"name","HASDEO BANK Admin");
@@ -141,9 +144,11 @@ public class BankController {
     public Map<String,Object> logout(HttpSession session) {
         if(Boolean.TRUE.equals(session.getAttribute("loggedIn"))) {
             String username=actor(session); sessionRepository.findBySessionHash(sessionHash(session)).ifPresent(AdminSessionRecord::logout);
+            activityRepository.save(new ActivityLog(username,"PRESENCE_OFFLINE","Admin session ended by sign out"));
             activityRepository.save(new ActivityLog(username,"ADMIN_LOGOUT","Admin signed out"));
         } else if(session.getAttribute("customerId")!=null) {
             String username=actor(session); sessionRepository.findBySessionHash(sessionHash(session)).ifPresent(AdminSessionRecord::logout);
+            activityRepository.save(new ActivityLog(username,"PRESENCE_OFFLINE","Customer session ended by sign out"));
             activityRepository.save(new ActivityLog(username,"CUSTOMER_LOGOUT","Customer signed out"));
         }
         session.invalidate(); return Map.of("success",true);
@@ -167,7 +172,15 @@ public class BankController {
     @Transactional
     public Map<String,Object> sessionPing(HttpSession session) {
         requireLogin(session);
-        sessionRepository.findBySessionHash(sessionHash(session)).ifPresent(AdminSessionRecord::seen);
+        String username=actor(session);
+        String role=session.getAttribute("customerId")!=null?"CUSTOMER":"ADMIN";
+        sessionRepository.findBySessionHash(sessionHash(session)).ifPresent(record -> {
+            if(record.shouldLogHeartbeat()) {
+                activityRepository.save(new ActivityLog(username,"PRESENCE_HEARTBEAT",role+" session heartbeat received"));
+                record.markPresenceLogged();
+            }
+            record.seen();
+        });
         return Map.of("success",true,"serverTime",Instant.now().toString());
     }
 
@@ -411,15 +424,26 @@ public class BankController {
     public List<Map<String,Object>> livePresence(HttpSession session) {
         requireAdmin(session); expireStaleSessions();
         Map<String,AdminSessionRecord> latest=new HashMap<>();
+        Map<String,Boolean> anyOnline=new HashMap<>();
+        Instant cutoff=Instant.now().minusSeconds(75);
         for(AdminSessionRecord record:sessionRepository.findByRoleOrderByLastSeenAtDesc("CUSTOMER")) {
             AdminSessionRecord prior=latest.get(record.getUsername());
             if(prior==null || (record.getLastSeenAt()!=null && (prior.getLastSeenAt()==null || record.getLastSeenAt().isAfter(prior.getLastSeenAt())))) latest.put(record.getUsername(),record);
+            if("ACTIVE".equals(record.getStatus()) && record.getLastSeenAt()!=null && record.getLastSeenAt().isAfter(cutoff)) anyOnline.put(record.getUsername(),true);
         }
-        Instant cutoff=Instant.now().minusSeconds(75);
         return customerRepository.findAll().stream().map(c->{
-            AdminSessionRecord r=latest.get(c.getUsername()); boolean online=r!=null && "ACTIVE".equals(r.getStatus()) && r.getLastSeenAt()!=null && r.getLastSeenAt().isAfter(cutoff);
+            AdminSessionRecord r=latest.get(c.getUsername()); boolean online=Boolean.TRUE.equals(anyOnline.get(c.getUsername()));
             Map<String,Object> m=new LinkedHashMap<>();m.put("name",c.getName());m.put("username",c.getUsername());m.put("status",online?"ONLINE":"OFFLINE");
             m.put("lastSeenAt",r==null?"Never":formatTime(r.getLastSeenAt()));m.put("loginAt",r==null?"Never":formatTime(r.getLoginAt()));return m;
+        }).toList();
+    }
+
+    @GetMapping("/owner/presence/history") @Transactional(readOnly=true)
+    public List<Map<String,Object>> presenceHistory(HttpSession session) {
+        requireAdmin(session);
+        List<String> events=List.of("PRESENCE_ONLINE","PRESENCE_HEARTBEAT","PRESENCE_OFFLINE","PRESENCE_EXPIRED");
+        return activityRepository.findByActionInOrderByCreatedAtDesc(events).stream().map(e->{
+            Map<String,Object> row=new LinkedHashMap<>();row.put("timestamp",formatTime(e.getCreatedAt()));row.put("username",e.getActor());row.put("event",e.getAction().replace("PRESENCE_",""));row.put("details",safe(e.getDetails()));return row;
         }).toList();
     }
 
@@ -506,7 +530,10 @@ public class BankController {
 
     private void expireStaleSessions() {
         Instant cutoff=Instant.now().minusSeconds(75);
-        sessionRepository.findByStatusAndLastSeenAtBefore("ACTIVE",cutoff).forEach(AdminSessionRecord::expire);
+        sessionRepository.findByStatusAndLastSeenAtBefore("ACTIVE",cutoff).forEach(record->{
+            record.expire();
+            activityRepository.save(new ActivityLog(record.getUsername(),"PRESENCE_EXPIRED",record.getRole()+" session marked offline after heartbeat timeout"));
+        });
     }
     private SiteSettings getSettings(){return settingsRepository.findById(1L).orElseGet(()->settingsRepository.save(new SiteSettings(1L)));}
     private AccountState lockedAccount(){return accountRepository.findByIdForUpdate(1L).orElseThrow(()->new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,"Demo account is not initialized."));}

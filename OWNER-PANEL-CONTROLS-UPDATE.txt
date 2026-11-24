@@ -23,3 +23,10 @@ Deployment:
 
 Database note:
 Hibernate ddl-auto update adds the new role and announcement timestamp columns to the existing PostgreSQL tables. Keep the existing database configured; do not create a new database for this update.
+
+PRESENCE HISTORY EXTENSION (combined update v5)
+- Live Presence now considers every active customer session, so a second logged-in browser does not incorrectly show a customer as OFFLINE when another session is still active.
+- Owner Panel > Live Presence now includes a persistent Presence Timeline with ONLINE, periodic HEARTBEAT, OFFLINE (sign-out), and EXPIRED (heartbeat timeout) events.
+- Heartbeats are sent every 20 seconds; timeline heartbeat events are stored at most once per 55 seconds per session to avoid excessive database writes.
+- Presence timeline events are stored in the existing owner activity log table and are available after refresh/redeploy. Events before this update cannot be reconstructed because they were not recorded previously.
+- Live Presence refreshes every 15 seconds while the Owner Panel tab is open. Presence only reflects signed-in website sessions, not physical device tracking.
